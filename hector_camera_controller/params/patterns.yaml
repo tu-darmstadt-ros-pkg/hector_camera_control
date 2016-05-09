@@ -1,0 +1,33 @@
+camera:
+  patterns: [
+    { name: look_around,
+      frame_id: base_stabilized,
+      interval: 1.0,
+      pattern: [
+        { pan: 0.0, tilt: -5.0 },
+        { pan: -40.0 },
+        { pan: -80.0 },
+        { tilt: 25.0 },
+        { pan: -40.0 },
+        { pan: 0.0 },
+        { pan: 40.0 },
+        { pan: 80.0 },
+        { tilt: -5.0 },
+        { pan: 40.0 },
+      ]
+    },
+    { name: look_ahead,
+      frame_id: base_stabilized,
+      interval: 0.0,
+      pattern: [
+        { pan: 0.0, tilt: 0.0 },
+      ]
+    },
+    { name: fixed,
+      frame_id: base_link,
+      interval: 0.0,
+      pattern: [
+        { pan: 0.0, tilt: 0.0 },
+      ]
+    },
+  ]

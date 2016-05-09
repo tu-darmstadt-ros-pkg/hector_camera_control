@@ -1,0 +1,1 @@
+rosbuild_add_executable(camera_control camera_control.cpp)
