@@ -1,6 +1,8 @@
+<?xml version="1.0"?>
+
 <launch>
-  <rosparam file="$(find monstertruck_camera_control)/params/patterns.yaml" />
-  <node name="camera_control" pkg="monstertruck_camera_control" type="camera_control" respawn="false" output="screen">
+  <rosparam file="$(find hector_camera_controller)/params/patterns.yaml" />
+  <node name="camera_control" pkg="hector_camera_controller" type="camera_control" respawn="false" output="screen">
     <param name="camera_frame_id" value="mounting_link" />
     <param name="look_at_period" value="0.05" />
     <param name="update_min_angle" value="0.087266463" />
