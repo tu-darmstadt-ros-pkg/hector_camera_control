@@ -66,7 +66,7 @@ protected:
   //virtual void Load(physics::ModelPtr _model, sdf::ElementPtr _sdf);
   void Init();
   void Reset();
-  void ComputeCommand();
+  //void ComputeCommand();
 
   void jointTrajStateCb(const control_msgs::JointControllerState::ConstPtr& msg);
 
@@ -77,13 +77,10 @@ private:
   //void publish_joint_states();
 
 private:
-  /// \brief The parent World
-  //physics::WorldPtr world;
 
   // Simulation time of the last update
-  ros::Time prevUpdateTime;
+  //ros::Time prevUpdateTime;
 
-  bool enableMotors;
 
   struct Servo {
     std::string name;
@@ -96,22 +93,13 @@ private:
   unsigned int countOfServos;
   unsigned int orderOfAxes[3];
   unsigned int rotationConv;
-  sensor_msgs::JointState joint_state;
 
-  // parameters
-  //std::string robotNamespace;
-  //std::string topicName;
-  //std::string jointStateName;
   ros::Duration controlPeriod;
 
   std::string controller_namespace_;
   std::string robot_link_reference_frame_;
   double control_rate_;
 
-  //float proportionalControllerGain;
-  //float derivativeControllerGain;
-  //double maximumVelocity;
-  //float maximumTorque;
 
   // ROS STUFF
   ros::NodeHandle nh_;
@@ -124,15 +112,9 @@ private:
   ros::Subscriber sub_;
   tf::TransformListener* transform_listener_;
 
-  // Custom Callback Queue
-  //ros::CallbackQueue queue_;
-//  boost::thread* callback_queue_thread_;
-//  void QueueThread();
-
-  // DiffDrive stuff
   void cmdCallback(const geometry_msgs::QuaternionStamped::ConstPtr& cmd_msg);
 
-  boost::mutex mutex;
+  //boost::mutex mutex;
   geometry_msgs::QuaternionStamped::ConstPtr current_cmd;
   control_msgs::JointControllerState::ConstPtr latest_joint_traj_state_;
   control_msgs::QueryTrajectoryState::Response latest_queried_joint_traj_state_;
@@ -141,8 +123,6 @@ private:
   boost::shared_ptr<actionlib::SimpleActionClient<control_msgs::FollowJointTrajectoryAction> > joint_traj_client_;
   ros::Subscriber joint_traj_state_sub_;
 
-  // Pointer to the update event connection
-  //event::ConnectionPtr updateConnection;
 };
 
 }
