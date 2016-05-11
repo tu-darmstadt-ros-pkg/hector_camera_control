@@ -157,7 +157,6 @@ void CamJointTrajControl::CalculateVelocities()
   }
 
   try{
-    // ros::Time simTime(world->GetSimTime().sec, world->GetSimTime().nsec);
     transform_listener_->lookupTransform(robot_link_reference_frame_, current_cmd->header.frame_id, ros::Time(0), transform);
   }
   catch (tf::TransformException ex){
@@ -165,17 +164,12 @@ void CamJointTrajControl::CalculateVelocities()
     return;
   }
 
-  //rotation_.Set(current_cmd->quaternion.w, current_cmd->quaternion.x, current_cmd->quaternion.y, current_cmd->quaternion.z);
-  //rotation_ = Eigen::Quaterniond(current_cmd->quaternion.w, current_cmd->quaternion.x, current_cmd->quaternion.y, current_cmd->quaternion.z);
-
-  //Eigen::Quaterniond quat(transform.getRotation().getW(),transform.getRotation().getX(),transform.getRotation().getY(),transform.getRotation().getZ());
-
   rotation_ = Eigen::Quaterniond(current_cmd->quaternion.w, current_cmd->quaternion.x, current_cmd->quaternion.y, current_cmd->quaternion.z);
 
   Eigen::Quaterniond quat(transform.getRotation().getW(), transform.getRotation().getX(),transform.getRotation().getY(),transform.getRotation().getZ());
 
 
-  std::cout << "\nquat rot\n" << rotation_.matrix() << "\nquat:\n" << quat.matrix() << "\n";
+  //std::cout << "\nquat rot\n" << rotation_.matrix() << "\nquat:\n" << quat.matrix() << "\n";
 
   rotation_ = quat * rotation_;
 
