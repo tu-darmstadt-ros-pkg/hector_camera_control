@@ -6,7 +6,13 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   roscpp
   tf
+  cmake_modules
+  actionlib
 )
+
+find_package(Eigen REQUIRED)
+include_directories(${EIGEN_INCLUDE_DIRS} include)
+add_definitions(${EIGEN_DEFINITIONS})
 
 
 catkin_package(
@@ -18,6 +24,14 @@ catkin_package(
 
 include_directories(
   ${catkin_INCLUDE_DIRS}
+  include
+)
+
+
+add_executable(cam_joint_trajectory_controller src/cam_joint_trajectory_controller.cpp)
+
+target_link_libraries(cam_joint_trajectory_controller
+  ${catkin_LIBRARIES}
 )
 
 
