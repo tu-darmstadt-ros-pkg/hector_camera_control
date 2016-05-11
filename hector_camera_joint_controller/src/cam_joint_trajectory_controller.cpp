@@ -65,6 +65,17 @@ void CamJointTrajControl::Init()
   pnh_.getParam("controller_namespace", controller_namespace_);
   pnh_.getParam("control_loop_period", control_rate_);
   pnh_.getParam("robot_link_reference_frame", robot_link_reference_frame_);
+  pnh_.getParam("stabilize_reference_frame", stabilize_link_reference_frame_);
+  pnh_.getParam("command_goal_time_from_start", command_goal_time_from_start_);
+
+  std::string type_string;
+  pnh_.getParam("joint_order_type", type_string);
+
+  if (type_string == "xyz"){
+    rotationConv = xyz;
+  }else{
+    rotationConv = zyx;
+  }
 
   controller_nh_ = ros::NodeHandle(controller_namespace_);
 
@@ -134,20 +145,6 @@ void CamJointTrajControl::Reset()
   current_cmd.reset();
 }
 
-/*
-// Update the controller
-void CamJointTrajControl::ComputeCommand()
-{
-  ros::Duration stepTime;
-  stepTime = ros::Time::now() - prevUpdateTime;
-
-  if (controlPeriod.toSec() == 0.0 || stepTime > controlPeriod) {
-    CalculateVelocities();
-    prevUpdateTime = ros::Time::now();
-  }
-}
-*/
-
 void CamJointTrajControl::CalculateVelocities()
 {
   tf::StampedTransform transform;
@@ -181,70 +178,9 @@ void CamJointTrajControl::CalculateVelocities()
   std::cout << "\nquat rot\n" << rotation_.matrix() << "\nquat:\n" << quat.matrix() << "\n";
 
   rotation_ = quat * rotation_;
-  //rotation_ = rotation_ * quat;
 
   double temp[5];
-  //double desAngle[3];
-  //double actualAngle[3] = {0.0, 0.0, 0.0};
-  //double actualVel[3] = {0.0, 0.0, 0.0};
 
-  //TODO use countOfServos for calculation
-  rotationConv = 99;
-  orderOfAxes[0] = 99;
-  orderOfAxes[1] = 99;
-  orderOfAxes[2] = 99;
-
-  /*
-
-  switch(countOfServos) {
-    case 2:
-
-      if ((servo[FIRST].axis.z == 1) && (servo[SECOND].axis.y == 1)) {
-        rotationConv = zyx;
-        orderOfAxes[0] = 0;
-        orderOfAxes[1] = 1;
-      }
-      else {
-        if ((servo[FIRST].axis.x == 1) && (servo[SECOND].axis.y == 1)) {
-          rotationConv = xyz;
-          orderOfAxes[0] = 0;
-          orderOfAxes[1] = 1;
-        }
-      }
-      break;
-
-    case 3:
-
-      if ((servo[FIRST].axis.z == 1) && (servo[SECOND].axis.y == 1) && (servo[THIRD].axis.x == 1)) {
-        rotationConv = zyx;
-        orderOfAxes[0] = 0;
-        orderOfAxes[1] = 1;
-        orderOfAxes[2] = 2;
-      }
-      else if ((servo[FIRST].axis.x == 1) && (servo[SECOND].axis.y == 1) && (servo[THIRD].axis.z == 1)) {
-        rotationConv = xyz;
-        orderOfAxes[0] = 0;
-        orderOfAxes[1] = 1;
-        orderOfAxes[2] = 2;
-      }
-      break;
-
-    case 1:
-
-      if (servo[FIRST].axis.y == 1) {
-         rotationConv = xyz;
-         orderOfAxes[0] = 1;
-      }
-      break;
-
-
-    default:
-      ROS_ERROR("Something went wrong. The count of servos is greater than 3");
-      break;
-  }
-  */
-
-  rotationConv = zyx;
   switch(rotationConv)  {
     case zyx:
       temp[0] =  2*(rotation_.x()*rotation_.y() + rotation_.w()*rotation_.z());
@@ -263,7 +199,7 @@ void CamJointTrajControl::CalculateVelocities()
       break;
 
     default:
-      //gzthrow("joint order " << rotationConv << " not supported");
+      ROS_ERROR("Invalid joint rotation convention!");
       break;
   }
 
@@ -289,7 +225,7 @@ void CamJointTrajControl::CalculateVelocities()
   goal.trajectory.points[0].positions.resize(2);
 
   goal.trajectory.points[0].positions[0] = desAngle[0];
-  goal.trajectory.points[0].positions[1] = desAngle[1];//angles[1];
+  goal.trajectory.points[0].positions[1] = desAngle[1];
 
   goal.trajectory.points[0].velocities.resize(2);
 
@@ -302,7 +238,7 @@ void CamJointTrajControl::CalculateVelocities()
   goal.trajectory.points[0].accelerations[1] = 0.0;
 
 
-  goal.trajectory.points[0].time_from_start = ros::Duration(1.0);
+  goal.trajectory.points[0].time_from_start = ros::Duration(command_goal_time_from_start_);
 
   joint_traj_client_->sendGoal(goal);
 }

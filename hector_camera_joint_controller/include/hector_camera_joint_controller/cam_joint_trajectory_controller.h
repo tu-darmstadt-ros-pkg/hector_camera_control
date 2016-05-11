@@ -98,7 +98,9 @@ private:
 
   std::string controller_namespace_;
   std::string robot_link_reference_frame_;
+  bool stabilize_link_reference_frame_;
   double control_rate_;
+  double command_goal_time_from_start_;
 
 
   // ROS STUFF
