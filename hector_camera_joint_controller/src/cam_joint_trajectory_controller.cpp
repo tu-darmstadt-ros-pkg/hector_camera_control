@@ -78,6 +78,8 @@ void CamJointTrajControl::Init()
     rotationConv = zyx;
   }
 
+  transform_listener_ = new tf::TransformListener();
+
   controller_nh_ = ros::NodeHandle(controller_namespace_);
 
   joint_traj_client_.reset(new actionlib::SimpleActionClient<control_msgs::FollowJointTrajectoryAction>(controller_nh_.getNamespace() + "/follow_joint_trajectory", true));
@@ -98,7 +100,9 @@ void CamJointTrajControl::Init()
       control_msgs::QueryTrajectoryState srv;
 
       // Hack to make this work in sim (otherwise time might be 0)
-      sleep(1);
+      //sleep(1);
+      transform_listener_->waitForTransform("map", default_look_dir_frame_, ros::Time(0), ros::Duration(2.0));
+
 
       srv.request.time = ros::Time::now();
 
@@ -119,24 +123,16 @@ void CamJointTrajControl::Init()
 
   }while (!retrieved_names);
 
-  double controlRate = 20.0;
-  //if (_sdf->HasElement("controlRate")) controlRate = _sdf->Get<double>("controlRate");
-  controlPeriod = ros::Duration(controlRate > 0.0 ? 1.0/controlRate : 0.0);
+  //double controlRate = 20.0;
 
+  //controlPeriod = ros::Duration(controlRate > 0.0 ? 1.0/controlRate : 0.0);
 
-  transform_listener_ = new tf::TransformListener();
-  //transform_listener_->setExtrapolationLimit(ros::Duration(1.0));
-
-  //if (!topicName.empty()) {
-  //ros::SubscribeOptions so = ros::SubscribeOptions::create<geometry_msgs::QuaternionStamped>("/camera/command", 1,
-  //                                                                                             boost::bind(&CamJointTrajControl::cmdCallback, this, _1),
-  //                                                                                             ros::VoidPtr(), &queue_);
-  //sub_ = nh_.subscribe(so);
   sub_ = nh_.subscribe("/camera/command", 1, &CamJointTrajControl::cmdCallback, this);
 
-  //}
-
   this->Reset();
+
+  //Sleep for short time to let tf receive messages
+  ros::Duration(1.0).sleep();
 }
 
 // Reset
@@ -153,11 +149,6 @@ void CamJointTrajControl::CalculateVelocities()
   geometry_msgs::QuaternionStamped command_to_use;
 
   if(!current_cmd){
-    //geometry_msgs::QuaternionStamped *default_cmd = new geometry_msgs::QuaternionStamped;
-    //default_cmd->header.frame_id = default_look_dir_frame_;
-    //default_cmd->quaternion.w = 1;
-    //current_cmd.reset(default_cmd);
-
     command_to_use.header.frame_id = default_look_dir_frame_;
     command_to_use.quaternion.w = 1;
   }else{
@@ -194,7 +185,7 @@ void CamJointTrajControl::CalculateVelocities()
   Eigen::Quaterniond quat(transform.getRotation().getW(), transform.getRotation().getX(),transform.getRotation().getY(),transform.getRotation().getZ());
 
 
-  std::cout << "\nquat rot\n" << rotation_.matrix() << "\nquat:\n" << quat.matrix() << "\n";
+  //std::cout << "\nquat rot\n" << rotation_.matrix() << "\nquat:\n" << quat.matrix() << "\n";
 
   rotation_ = quat * rotation_;
 
@@ -231,7 +222,7 @@ void CamJointTrajControl::CalculateVelocities()
 
   //std::cout << "\nangles:\n" << angles << "\n";
 
-  std::cout << "\nangles:\n" << desAngle << "\n";
+  //std::cout << "\nangles:\n" << desAngle << "\n";
 
   control_msgs::FollowJointTrajectoryGoal goal;
   goal.goal_time_tolerance = ros::Duration(1.0);

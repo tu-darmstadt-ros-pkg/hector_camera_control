@@ -94,8 +94,6 @@ private:
   unsigned int orderOfAxes[3];
   unsigned int rotationConv;
 
-  ros::Duration controlPeriod;
-
   std::string controller_namespace_;
   std::string robot_link_reference_frame_;
 
