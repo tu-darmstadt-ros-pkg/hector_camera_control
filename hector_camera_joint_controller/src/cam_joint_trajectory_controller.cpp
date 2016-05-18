@@ -64,8 +64,9 @@ void CamJointTrajControl::Init()
 
   pnh_.getParam("controller_namespace", controller_namespace_);
   pnh_.getParam("control_loop_period", control_rate_);
+  pnh_.getParam("default_direction_reference_frame", default_look_dir_frame_);
+  pnh_.getParam("stabilize_default_direction_reference", stabilize_default_look_dir_frame_);
   pnh_.getParam("robot_link_reference_frame", robot_link_reference_frame_);
-  pnh_.getParam("stabilize_reference_frame", stabilize_link_reference_frame_);
   pnh_.getParam("command_goal_time_from_start", command_goal_time_from_start_);
 
   std::string type_string;
@@ -149,22 +150,36 @@ void CamJointTrajControl::CalculateVelocities()
 {
   tf::StampedTransform transform;
 
+  geometry_msgs::QuaternionStamped command_to_use;
+
   if(!current_cmd){
-    geometry_msgs::QuaternionStamped *default_cmd = new geometry_msgs::QuaternionStamped;
-    default_cmd->header.frame_id = "map";
-    default_cmd->quaternion.w = 1;
-    current_cmd.reset(default_cmd);
+    //geometry_msgs::QuaternionStamped *default_cmd = new geometry_msgs::QuaternionStamped;
+    //default_cmd->header.frame_id = default_look_dir_frame_;
+    //default_cmd->quaternion.w = 1;
+    //current_cmd.reset(default_cmd);
+
+    command_to_use.header.frame_id = "map"; //default_look_dir_frame_;
+    command_to_use.quaternion.w = 1;
+  }else{
+    command_to_use = *current_cmd;
+  }
+
+  if (stabilize_default_look_dir_frame_){
+    tf::StampedTransform stab_transform;
+    transform_listener_->lookupTransform("map", default_look_dir_frame_, ros::Time(0), stab_transform);
+
+    tf::quaternionTFToMsg(stab_transform.getRotation(), command_to_use.quaternion);
   }
 
   try{
-    transform_listener_->lookupTransform(robot_link_reference_frame_, current_cmd->header.frame_id, ros::Time(0), transform);
+    transform_listener_->lookupTransform(robot_link_reference_frame_, command_to_use.header.frame_id, ros::Time(0), transform);
   }
   catch (tf::TransformException ex){
     ROS_WARN("Failed to transform, not sending command to joints: %s",ex.what());
     return;
   }
 
-  rotation_ = Eigen::Quaterniond(current_cmd->quaternion.w, current_cmd->quaternion.x, current_cmd->quaternion.y, current_cmd->quaternion.z);
+  rotation_ = Eigen::Quaterniond(command_to_use.quaternion.w, command_to_use.quaternion.x, command_to_use.quaternion.y, command_to_use.quaternion.z);
 
   Eigen::Quaterniond quat(transform.getRotation().getW(), transform.getRotation().getX(),transform.getRotation().getY(),transform.getRotation().getZ());
 

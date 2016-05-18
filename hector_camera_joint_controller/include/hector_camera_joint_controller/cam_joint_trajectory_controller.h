@@ -98,7 +98,10 @@ private:
 
   std::string controller_namespace_;
   std::string robot_link_reference_frame_;
-  bool stabilize_link_reference_frame_;
+
+  std::string default_look_dir_frame_;
+  bool stabilize_default_look_dir_frame_;
+
   double control_rate_;
   double command_goal_time_from_start_;
 
