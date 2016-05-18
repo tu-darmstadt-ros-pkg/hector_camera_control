@@ -158,7 +158,7 @@ void CamJointTrajControl::CalculateVelocities()
     //default_cmd->quaternion.w = 1;
     //current_cmd.reset(default_cmd);
 
-    command_to_use.header.frame_id = "map"; //default_look_dir_frame_;
+    command_to_use.header.frame_id = default_look_dir_frame_;
     command_to_use.quaternion.w = 1;
   }else{
     command_to_use = *current_cmd;
@@ -166,9 +166,19 @@ void CamJointTrajControl::CalculateVelocities()
 
   if (stabilize_default_look_dir_frame_){
     tf::StampedTransform stab_transform;
-    transform_listener_->lookupTransform("map", default_look_dir_frame_, ros::Time(0), stab_transform);
+    try{
+      transform_listener_->lookupTransform("map", default_look_dir_frame_, ros::Time(0), stab_transform);
+    }catch (tf::TransformException ex){
+      ROS_WARN("Failed to perform stabilization, not sending command to joints: %s",ex.what());
+      return;
+    }
 
-    tf::quaternionTFToMsg(stab_transform.getRotation(), command_to_use.quaternion);
+    double roll, pitch, yaw;
+    stab_transform.getBasis().getRPY(roll, pitch, yaw);
+
+    stab_transform.getBasis().setRPY(roll, pitch, 0.0);
+
+    tf::quaternionTFToMsg(stab_transform.getRotation().inverse(), command_to_use.quaternion);
   }
 
   try{
@@ -184,7 +194,7 @@ void CamJointTrajControl::CalculateVelocities()
   Eigen::Quaterniond quat(transform.getRotation().getW(), transform.getRotation().getX(),transform.getRotation().getY(),transform.getRotation().getZ());
 
 
-  //std::cout << "\nquat rot\n" << rotation_.matrix() << "\nquat:\n" << quat.matrix() << "\n";
+  std::cout << "\nquat rot\n" << rotation_.matrix() << "\nquat:\n" << quat.matrix() << "\n";
 
   rotation_ = quat * rotation_;
 
@@ -221,7 +231,7 @@ void CamJointTrajControl::CalculateVelocities()
 
   //std::cout << "\nangles:\n" << angles << "\n";
 
-  //std::cout << "\nangles:\n" << desAngle << "\n";
+  std::cout << "\nangles:\n" << desAngle << "\n";
 
   control_msgs::FollowJointTrajectoryGoal goal;
   goal.goal_time_tolerance = ros::Duration(1.0);
