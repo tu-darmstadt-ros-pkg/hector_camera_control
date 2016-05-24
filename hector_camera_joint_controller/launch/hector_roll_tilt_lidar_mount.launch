@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 
 <launch>
-  <node name="pan_tilt_sensor_head_joint_control" pkg="hector_camera_joint_controller" type="cam_joint_trajectory_controller" respawn="true" output="screen">
+  <node name="roll_tilt_lidar_mount_joint_control" pkg="hector_camera_joint_controller" type="cam_joint_trajectory_controller" respawn="true" output="screen">
     <param name="controller_namespace" value="/tracker_controllers/stab_laser_traj_controller" />
     <param name="control_loop_period" value="0.05" />
     <param name="command_goal_time_from_start" value="0.05" />
