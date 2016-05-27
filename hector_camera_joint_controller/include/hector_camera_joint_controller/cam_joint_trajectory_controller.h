@@ -44,6 +44,7 @@
 #include <eigen3/Eigen/Geometry>
 
 #include <actionlib/client/simple_action_client.h>
+#include <actionlib/client/action_client.h>
 #include <control_msgs/FollowJointTrajectoryAction.h>
 #include <control_msgs/JointControllerState.h>
 #include <control_msgs/QueryTrajectoryState.h>
@@ -75,6 +76,10 @@ protected:
 private:
   void CalculateVelocities();
   //void publish_joint_states();
+
+  //void doneCb(const actionlib::SimpleClientGoalState& state,
+  //            const control_msgs::FollowJointTrajectoryResultConstPtr& result);
+  void transistionCb(actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> gh);
 
 private:
 
@@ -123,8 +128,10 @@ private:
   control_msgs::QueryTrajectoryState::Response latest_queried_joint_traj_state_;
   Eigen::Quaterniond rotation_;
 
-  boost::shared_ptr<actionlib::SimpleActionClient<control_msgs::FollowJointTrajectoryAction> > joint_traj_client_;
+  boost::shared_ptr<actionlib::ActionClient<control_msgs::FollowJointTrajectoryAction> > joint_traj_client_;
   ros::Subscriber joint_traj_state_sub_;
+
+  actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> latest_gh_;
 
 };
 

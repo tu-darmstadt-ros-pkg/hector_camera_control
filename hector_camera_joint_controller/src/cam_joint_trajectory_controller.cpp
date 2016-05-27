@@ -82,7 +82,7 @@ void CamJointTrajControl::Init()
 
   controller_nh_ = ros::NodeHandle(controller_namespace_);
 
-  joint_traj_client_.reset(new actionlib::SimpleActionClient<control_msgs::FollowJointTrajectoryAction>(controller_nh_.getNamespace() + "/follow_joint_trajectory", true));
+  joint_traj_client_.reset(new actionlib::ActionClient<control_msgs::FollowJointTrajectoryAction>(controller_nh_.getNamespace() + "/follow_joint_trajectory"));
 
   // Do not retrieve joint trajectory controller state for the moment
   //joint_traj_state_sub_ = controller_nh_.subscribe("state", 1, &CamJointTrajControl::jointTrajStateCb, this);
@@ -225,6 +225,7 @@ void CamJointTrajControl::CalculateVelocities()
   //std::cout << "\nangles:\n" << desAngle << "\n";
 
   control_msgs::FollowJointTrajectoryGoal goal;
+
   goal.goal_time_tolerance = ros::Duration(1.0);
   //goal.goal.path_tolerance = 1.0;
   //goal.goal.trajectory.joint_names
@@ -247,10 +248,12 @@ void CamJointTrajControl::CalculateVelocities()
   goal.trajectory.points[0].accelerations[0] = 0.0;
   goal.trajectory.points[0].accelerations[1] = 0.0;
 
-
   goal.trajectory.points[0].time_from_start = ros::Duration(command_goal_time_from_start_);
 
-  joint_traj_client_->sendGoal(goal);
+  //latest_gh_ = joint_traj_client_->sendGoal(goal);
+                               //boost::bind(&CamJointTrajControl::doneCb, this, _1, _2));
+
+  latest_gh_ = joint_traj_client_->sendGoal(goal, boost::bind(&CamJointTrajControl::transistionCb, this, _1));
 }
 
 // NEW: Store the velocities from the ROS message
@@ -267,6 +270,44 @@ void CamJointTrajControl::jointTrajStateCb(const control_msgs::JointControllerSt
 void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
 {
   this->CalculateVelocities();
+}
+
+/*
+void CamJointTrajControl::doneCb(const actionlib::SimpleClientGoalState& state,
+            const control_msgs::FollowJointTrajectoryResultConstPtr& result)
+{
+  //state.
+  ROS_INFO("T: %s ", state.toString().c_str(), state.s)
+      ROS_INFO("T: %s ", state.toString().c_str(), state.s)
+}
+*/
+
+void CamJointTrajControl::transistionCb(actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> gh)
+{
+  //if (gh.getTerminalState().getText())
+  //gh.getTerminalState();
+
+  //ROS_INFO("commstate: %s ", gh.getCommState().toString().c_str());
+
+  if (!(gh == latest_gh_)){
+    ROS_ERROR("Different goal handles!");
+  }
+
+  if (gh.getCommState() == actionlib::CommState::DONE ){
+    ROS_INFO("T: %s ", gh.getTerminalState().getText().c_str());
+
+    if (gh.getTerminalState() == actionlib::TerminalState::SUCCEEDED){
+      ROS_INFO("Execution succeeded");
+    }else{
+      if (latest_gh_ == gh){
+        ROS_INFO("Preempted, same goal");
+      }else{
+        ROS_ERROR("Preempted from outside, cancelling");
+      }
+    }
+  }else{
+
+  }
 }
 
 }
