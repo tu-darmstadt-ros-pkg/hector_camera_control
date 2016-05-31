@@ -108,6 +108,8 @@ private:
   double control_rate_;
   double command_goal_time_from_start_;
 
+  bool joint_trajectory_preempted_;
+
 
   // ROS STUFF
   ros::NodeHandle nh_;
@@ -131,7 +133,7 @@ private:
   boost::shared_ptr<actionlib::ActionClient<control_msgs::FollowJointTrajectoryAction> > joint_traj_client_;
   ros::Subscriber joint_traj_state_sub_;
 
-  actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> latest_gh_;
+  std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> > gh_list_;
 
 };
 
