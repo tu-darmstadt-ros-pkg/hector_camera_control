@@ -275,48 +275,8 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
   }
 }
 
-/*
-void CamJointTrajControl::doneCb(const actionlib::SimpleClientGoalState& state,
-            const control_msgs::FollowJointTrajectoryResultConstPtr& result)
-{
-  //state.
-  ROS_INFO("T: %s ", state.toString().c_str(), state.s)
-      ROS_INFO("T: %s ", state.toString().c_str(), state.s)
-}
-*/
-
 void CamJointTrajControl::transistionCb(actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> gh)
-{
-  //if (gh.getTerminalState().getText())
-  //gh.getTerminalState();
-
-  //ROS_INFO("commstate: %s ", gh.getCommState().toString().c_str());
-
-  /*
-  if (!(gh == latest_gh_)){
-    ROS_ERROR("Different goal handles!");
-  }
-
-  ROS_INFO("-------------");
-  ROS_INFO("CommState: %s", gh.getCommState().toString().c_str());
-
-  if (gh.getCommState() == actionlib::CommState::DONE ){
-    ROS_INFO("T: %s ", gh.getTerminalState().getText().c_str());
-
-
-    if (gh.getTerminalState() == actionlib::TerminalState::SUCCEEDED){
-      ROS_INFO("Execution succeeded");
-    }else{
-      if (latest_gh_ == gh){
-        ROS_INFO("Not succeeded");
-      }else{
-        ROS_ERROR("Preempted from outside, cancelling");
-      }
-
-  }
-  */
-
-
+{  
   std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> >::iterator it = gh_list_.begin();
 
   // Erase goal handles that are DONE
@@ -330,48 +290,34 @@ void CamJointTrajControl::transistionCb(actionlib::ClientGoalHandle<control_msgs
 
   // If there are no goal handles left after we erased the ones that are DONE,
   // this means our last send one got preempted by the server as someone else
-  // took control. In that case, cease sending new actions.
+  // took control of the server. In that case, cease sending new actions.
   if (gh_list_.size() == 0){
     ROS_INFO("Current joint action command got preempted, cancelling sending commands.");
     joint_trajectory_preempted_ = true;
   }
 
-
+  // Uncomment below for debugging
+  /*
+  ROS_INFO("-------------");
   for (std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> >::iterator it = gh_list_.begin(); it != gh_list_.end(); ++it){
 
-    /*
-    if (*it == gh){
-      ROS_INFO("Same goal handle!");
-    }else{
-      ROS_ERROR("Different goal handles!");
-    }
-    */
+
+    //if (*it == gh){
+    //  ROS_INFO("Same goal handle!");
+    //}else{
+    //  ROS_ERROR("Different goal handles!");
+    //}
+
 
     if (it->getCommState() == actionlib::CommState::DONE ){
-      //ROS_INFO("T: %s ", gh.getTerminalState().getText().c_str());
-
-
       ROS_INFO("Commstate: %s  Terminalstate: %s", it->getCommState().toString().c_str(), it->getTerminalState().getText().c_str());
-      /*
-      if (gh.getTerminalState() == actionlib::TerminalState::SUCCEEDED){
-        ROS_INFO("Execution succeeded");
-      }else{
-        if (latest_gh_ == gh){
-          ROS_INFO("Not succeeded");
-        }else{
-          ROS_ERROR("Preempted from outside, cancelling");
-        }
-      */
     }else{
       ROS_INFO("Commstate: %s", it->getCommState().toString().c_str());
     }
     ROS_INFO("+++++++++");
   }
-
   ROS_INFO("-------------");
-  //}else{
-
-  //}
+  */
 }
 
 }
