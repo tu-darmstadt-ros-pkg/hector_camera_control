@@ -302,7 +302,10 @@ void CamJointTrajControl::transistionCb(actionlib::ClientGoalHandle<control_msgs
   if (gh_list_.size() == 0){
     ROS_INFO("Current joint action command got preempted, cancelling sending commands.");
     joint_trajectory_preempted_ = true;
-    look_at_server_->setPreempted();
+
+    if (look_at_server_->isActive()){
+      look_at_server_->setPreempted();
+    }
   }
 
   // Uncomment below for debugging
