@@ -134,6 +134,14 @@ void CamJointTrajControl::Init()
 
   //Sleep for short time to let tf receive messages
   ros::Duration(1.0).sleep();
+
+  look_at_server_.reset(new actionlib::SimpleActionServer<hector_perception_msgs::LookAtAction>(pnh_, "look_at", 0, false));
+
+  //look_at_server_->registerGoalCallback(boost::bind(&CamJointTrajControl::lookAtGoalCallback, this, _1));
+  look_at_server_->registerGoalCallback(boost::bind(&CamJointTrajControl::lookAtGoalCallback, this));
+  look_at_server_->registerPreemptCallback(boost::bind(&CamJointTrajControl::lookAtPreemptCallback, this));
+
+  look_at_server_->start();
 }
 
 // Reset
@@ -294,6 +302,7 @@ void CamJointTrajControl::transistionCb(actionlib::ClientGoalHandle<control_msgs
   if (gh_list_.size() == 0){
     ROS_INFO("Current joint action command got preempted, cancelling sending commands.");
     joint_trajectory_preempted_ = true;
+    look_at_server_->setPreempted();
   }
 
   // Uncomment below for debugging
@@ -320,6 +329,33 @@ void CamJointTrajControl::transistionCb(actionlib::ClientGoalHandle<control_msgs
   */
 }
 
+void CamJointTrajControl::lookAtGoalCallback()
+{
+  actionlib::SimpleActionServer<hector_perception_msgs::LookAtAction>::GoalConstPtr goal = look_at_server_->acceptNewGoal();
+  joint_trajectory_preempted_ = false;
+}
+
+
+void CamJointTrajControl::lookAtPreemptCallback()
+{
+  look_at_server_->setPreempted();
+  joint_trajectory_preempted_ = true;
+}
+
+/*
+void CamJointTrajControl::lookAtGoalCallback(actionlib::ServerGoalHandle<hector_perception_msgs::LookAtAction> goal)
+{
+
+}
+*/
+
+
+/*
+void CamJointTrajControl::lookAtPreemptCallback(actionlib::ServerGoalHandle<hector_perception_msgs::LookAtActionGoal> preempt)
+{
+
+}
+*/
 }
 
 int main(int argc, char **argv)

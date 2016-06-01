@@ -45,9 +45,13 @@
 
 #include <actionlib/client/simple_action_client.h>
 #include <actionlib/client/action_client.h>
+#include <actionlib/server/simple_action_server.h>
+
 #include <control_msgs/FollowJointTrajectoryAction.h>
 #include <control_msgs/JointControllerState.h>
 #include <control_msgs/QueryTrajectoryState.h>
+
+#include <hector_perception_msgs/LookAtAction.h>
 
 // Boost
 //#include <boost/thread.hpp>
@@ -80,6 +84,12 @@ private:
   //void doneCb(const actionlib::SimpleClientGoalState& state,
   //            const control_msgs::FollowJointTrajectoryResultConstPtr& result);
   void transistionCb(actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> gh);
+
+  //void lookAtGoalCallback(actionlib::ServerGoalHandle<hector_perception_msgs::LookAtAction> goal);
+  //void lookAtPreemptCallback(actionlib::ServerGoalHandle<hector_perception_msgs::LookAtActionGoal> preempt);
+  void lookAtGoalCallback();
+  void lookAtPreemptCallback();
+
 
 private:
 
@@ -132,6 +142,8 @@ private:
 
   boost::shared_ptr<actionlib::ActionClient<control_msgs::FollowJointTrajectoryAction> > joint_traj_client_;
   ros::Subscriber joint_traj_state_sub_;
+
+  boost::shared_ptr<actionlib::SimpleActionServer<hector_perception_msgs::LookAtAction> > look_at_server_;
 
   std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> > gh_list_;
 

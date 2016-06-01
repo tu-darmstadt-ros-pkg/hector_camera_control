@@ -8,6 +8,7 @@ find_package(catkin REQUIRED COMPONENTS
   tf
   cmake_modules
   actionlib
+  hector_perception_msgs
 )
 
 find_package(Eigen REQUIRED)
