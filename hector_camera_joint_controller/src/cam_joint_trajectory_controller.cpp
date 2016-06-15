@@ -274,12 +274,15 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
   current_state_transform.getBasis().getRPY(roll, pitch, yaw);
 
   double error_yaw, error_pitch, error_roll;
+  double diff_1, diff_2;
 
   switch(rotationConv)  {
     case zyx:
 
       error_yaw = angles::shortest_angular_distance(desAngle[0], yaw);
       error_pitch = angles::shortest_angular_distance(desAngle[1], pitch);
+      diff_1 = error_yaw;
+      diff_2 = error_pitch;
 
 
       break;
@@ -288,12 +291,21 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
 
       error_pitch = angles::shortest_angular_distance(desAngle[0], pitch);
       error_roll = angles::shortest_angular_distance(desAngle[1], yaw);
+      diff_1 = error_pitch;
+      diff_2 = error_roll;
 
       break;
 
     default:
       ROS_ERROR("Invalid joint rotation convention!");
       break;
+  }
+
+  if (control_mode_ = MODE_LOOKAT && lookat_oneshot_){
+    ROS_WARN_THROTTLE(5.0,"Lookat with return not implemented yet!");
+    //look_at_server_->setSucceeded();
+    //control_mode_ = MODE_OFF;
+
   }
 
   //Eigen::Vector3d angles = rotation_.matrix().eulerAngles(2, 0, 2);
@@ -484,6 +496,7 @@ void CamJointTrajControl::lookAtGoalCallback()
     }
   }else{
     lookat_point_ = goal->look_at_target.target_point;
+    lookat_oneshot_ = !goal->look_at_target.no_continuous_tracking;
     control_mode_ = MODE_LOOKAT;
   }
 }

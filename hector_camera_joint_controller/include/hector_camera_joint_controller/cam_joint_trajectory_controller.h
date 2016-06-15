@@ -127,6 +127,7 @@ private:
   unsigned int control_mode_;
 
   geometry_msgs::PointStamped lookat_point_;
+  bool lookat_oneshot_;
 
   // ROS STUFF
   ros::NodeHandle nh_;
