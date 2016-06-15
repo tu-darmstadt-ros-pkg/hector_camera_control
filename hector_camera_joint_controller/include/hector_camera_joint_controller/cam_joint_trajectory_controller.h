@@ -78,7 +78,8 @@ protected:
   void controlTimerCallback(const ros::TimerEvent& event);
 
 private:
-  void CalculateVelocities();
+  bool ComputeDirectionForPoint(const geometry_msgs::PointStamped& lookat_point, tf::Quaternion& quaternion);
+  void ComputeAndSendCommand();
   //void publish_joint_states();
 
   //void doneCb(const actionlib::SimpleClientGoalState& state,
@@ -89,6 +90,8 @@ private:
   //void lookAtPreemptCallback(actionlib::ServerGoalHandle<hector_perception_msgs::LookAtActionGoal> preempt);
   void lookAtGoalCallback();
   void lookAtPreemptCallback();
+
+  bool loadPattern(const std::string& pattern_name);
 
 
 private:
@@ -111,6 +114,7 @@ private:
 
   std::string controller_namespace_;
   std::string robot_link_reference_frame_;
+  std::string lookat_frame_;
 
   std::string default_look_dir_frame_;
   bool stabilize_default_look_dir_frame_;
@@ -120,6 +124,9 @@ private:
 
   bool joint_trajectory_preempted_;
 
+  unsigned int control_mode_;
+
+  geometry_msgs::PointStamped lookat_point_;
 
   // ROS STUFF
   ros::NodeHandle nh_;
@@ -146,6 +153,18 @@ private:
   boost::shared_ptr<actionlib::SimpleActionServer<hector_perception_msgs::LookAtAction> > look_at_server_;
 
   std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> > gh_list_;
+
+  struct PatternElement {
+    geometry_msgs::QuaternionStamped orientation;
+    ros::Duration interval;
+  };
+  std::vector<PatternElement> pattern_;
+  unsigned int pattern_index_;
+  ros::Duration default_interval_;
+
+  std::string patterns_param_;
+  ros::Time pattern_switch_time_;
+
 
 };
 

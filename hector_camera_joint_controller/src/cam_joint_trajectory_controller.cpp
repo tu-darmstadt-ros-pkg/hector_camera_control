@@ -37,6 +37,8 @@ enum
   FIRST = 0, SECOND = 1, THIRD = 2
 };
 
+typedef enum { MODE_OFF = 0, MODE_LOOKAT = 1, MODE_PATTERN = 2, MODE_OVERRIDE = 4, MODE_ORIENTATION = 5 } ControlMode;
+
 enum
 {
   xyz, zyx
@@ -45,6 +47,7 @@ enum
 // Constructor
 CamJointTrajControl::CamJointTrajControl()
   : joint_trajectory_preempted_(false)
+  , patterns_param_("camera/patterns")
 {
   transform_listener_ = 0;
 
@@ -68,7 +71,14 @@ void CamJointTrajControl::Init()
   pnh_.getParam("default_direction_reference_frame", default_look_dir_frame_);
   pnh_.getParam("stabilize_default_direction_reference", stabilize_default_look_dir_frame_);
   pnh_.getParam("robot_link_reference_frame", robot_link_reference_frame_);
+  pnh_.getParam("lookat_frame", lookat_frame_);
   pnh_.getParam("command_goal_time_from_start", command_goal_time_from_start_);
+
+  double default_interval_double = 1.0;
+  pnh_.getParam("default_interval", default_interval_double);
+  default_interval_ = ros::Duration(default_interval_double);
+
+  pnh_.getParam("patterns_param", patterns_param_);
 
   std::string type_string;
   pnh_.getParam("joint_order_type", type_string);
@@ -151,7 +161,43 @@ void CamJointTrajControl::Reset()
   current_cmd.reset();
 }
 
-void CamJointTrajControl::CalculateVelocities()
+bool CamJointTrajControl::ComputeDirectionForPoint(const geometry_msgs::PointStamped& lookat_point, tf::Quaternion& quaternion)
+{
+  geometry_msgs::PointStamped lookat_camera;
+
+  tf::StampedTransform base_camera_transform;
+
+  try {
+    transform_listener_->waitForTransform(robot_link_reference_frame_, lookat_point.header.frame_id, ros::Time(), ros::Duration(1.0));
+    transform_listener_->transformPoint(robot_link_reference_frame_, ros::Time(), lookat_point, lookat_point.header.frame_id, lookat_camera);
+  } catch (std::runtime_error& e) {
+    ROS_WARN("Could not transform look_at position to target frame_id %s", e.what());
+    return false;
+  }
+
+  try {
+    transform_listener_->waitForTransform(robot_link_reference_frame_, lookat_frame_, ros::Time(), ros::Duration(1.0));
+    transform_listener_->lookupTransform(robot_link_reference_frame_, lookat_frame_, ros::Time(), base_camera_transform);
+  } catch (std::runtime_error& e) {
+    ROS_WARN("Could not transform from base frame to camera_frame %s", e.what());
+    return false;
+  }
+
+  geometry_msgs::QuaternionStamped orientation;
+  orientation.header = lookat_camera.header;
+  orientation.header.frame_id = "base_link";
+  tf::Vector3 dir(lookat_camera.point.x - base_camera_transform.getOrigin().x(), lookat_camera.point.y - base_camera_transform.getOrigin().y(), lookat_camera.point.z - base_camera_transform.getOrigin().z());
+  quaternion = tf::createQuaternionFromRPY(0.0, -atan2(dir.z(), sqrt(dir.x()*dir.x() + dir.y()*dir.y())), atan2(dir.y(), dir.x()));
+
+  //if (last_orientation.length2() == 0.0 || quaternion.angle(last_orientation) >= update_min_angle) {
+  //  tf::quaternionTFToMsg(quaternion, orientation.quaternion);
+  //  orientationPub.publish(orientation);
+  //  last_orientation = quaternion;
+  //}
+  return true;
+}
+
+void CamJointTrajControl::ComputeAndSendCommand()
 {
   tf::StampedTransform transform;
 
@@ -278,8 +324,26 @@ void CamJointTrajControl::jointTrajStateCb(const control_msgs::JointControllerSt
 
 void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
 {
+  // If we got preempted, do nothing
   if (!joint_trajectory_preempted_){
-    this->CalculateVelocities();
+
+    if (control_mode_ == MODE_LOOKAT){
+      tf::Quaternion command_quat;
+
+      this->ComputeDirectionForPoint(this->lookat_point_, command_quat);
+
+    }else if (control_mode_ == MODE_PATTERN){
+
+      if (ros::Time::now() > pattern_switch_time_){
+        pattern_index_ = (pattern_index_ + 1) % pattern_.size();
+        pattern_switch_time_ = ros::Time::now() + pattern_[pattern_index_].interval;
+      }
+
+    }
+
+
+
+    this->ComputeAndSendCommand();
   }
 }
 
@@ -336,6 +400,25 @@ void CamJointTrajControl::lookAtGoalCallback()
 {
   actionlib::SimpleActionServer<hector_perception_msgs::LookAtAction>::GoalConstPtr goal = look_at_server_->acceptNewGoal();
   joint_trajectory_preempted_ = false;
+
+  if (!goal->look_at_target.pattern.empty()){
+    if (this->loadPattern(goal->look_at_target.pattern)){
+      control_mode_ = MODE_PATTERN;
+      pattern_index_ = 0;
+
+      //pattern_timer.setPeriod(pattern_[pattern_index_].interval);
+      pattern_switch_time_ = ros::Time::now() + pattern_[pattern_index_].interval;
+
+    }else{
+      // Keep current mode for now
+      //control_mode_ = MODE_OFF;
+    }
+  }else{
+    lookat_point_ = goal->look_at_target.target_point;
+    control_mode_ = MODE_LOOKAT;
+  }
+
+
 }
 
 
@@ -359,6 +442,49 @@ void CamJointTrajControl::lookAtPreemptCallback(actionlib::ServerGoalHandle<hect
 
 }
 */
+
+bool CamJointTrajControl::loadPattern(const std::string& pattern_name)
+{
+  ros::NodeHandle nh;
+
+  pattern_.clear();
+  if (pattern_name.empty()) return true;
+
+  XmlRpc::XmlRpcValue description;
+  double pan = 0.0, tilt = 0.0;
+  ros::Duration interval(default_interval_);
+  PatternElement element;
+  element.orientation.header.frame_id = this->robot_link_reference_frame_;
+
+  if (!nh.getParamCached(patterns_param_, description)) return false;
+  for(int i = 0; i < description.size(); ++i) {
+    if (!description[i].hasMember("name") || description[i]["name"] != pattern_name) continue;
+    if (!description[i].hasMember("pattern")) continue;
+
+    ROS_INFO("Loaded pattern %s!", pattern_name.c_str());
+
+    if (description[i].hasMember("frame_id")) element.orientation.header.frame_id = std::string(description[i]["frame_id"]);
+    if (description[i].hasMember("interval")) interval = ros::Duration(description[i]["interval"]);
+
+    for(int j = 0; j < description[i]["pattern"].size(); ++j) {
+      XmlRpc::XmlRpcValue& element_description = description[i]["pattern"][j];
+
+      element.interval = interval;
+      if (element_description.hasMember("interval")) element.interval = ros::Duration(element_description["interval"]);
+
+      if (element_description.hasMember("pan"))  pan  = element_description["pan"];
+      if (element_description.hasMember("tilt")) tilt = element_description["tilt"];
+      tf::quaternionTFToMsg(tf::createQuaternionFromRPY(0.0, tilt * M_PI/180.0, pan * M_PI/180.0), element.orientation.quaternion);
+      pattern_.push_back(element);
+    }
+
+    return !pattern_.empty();
+  }
+
+  ROS_ERROR("Pattern %s not found in %s!", pattern_name.c_str(), patterns_param_.c_str());
+  return false;
+}
+
 }
 
 int main(int argc, char **argv)
