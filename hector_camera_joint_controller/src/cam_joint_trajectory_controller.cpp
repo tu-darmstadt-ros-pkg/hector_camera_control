@@ -301,7 +301,7 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
       break;
   }
 
-  if (control_mode_ = MODE_LOOKAT && lookat_oneshot_){
+  if (control_mode_ == MODE_LOOKAT && lookat_oneshot_){
     ROS_WARN_THROTTLE(5.0,"Lookat with return not implemented yet!");
     //look_at_server_->setSucceeded();
     //control_mode_ = MODE_OFF;
