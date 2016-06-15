@@ -7,6 +7,7 @@
     <param name="command_goal_time_from_start" value="0.075" />
 
     <param name="robot_link_reference_frame" value="base_link" />
+    <param name="lookat_reference_frame" value="stab_laser_frame" />
 
     <param name="default_direction_reference_frame" value="base_link" />
     <param name="stabilize_default_direction_reference" value="true" />

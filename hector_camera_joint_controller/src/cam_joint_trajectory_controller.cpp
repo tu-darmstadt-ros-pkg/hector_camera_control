@@ -29,6 +29,7 @@
 #include <hector_camera_joint_controller/cam_joint_trajectory_controller.h>
 
 #include <control_msgs/FollowJointTrajectoryAction.h>
+#include <angles/angles.h>
 
 namespace cam_control {
 
@@ -74,7 +75,7 @@ void CamJointTrajControl::Init()
   pnh_.getParam("robot_link_reference_frame", robot_link_reference_frame_);
 
   lookat_frame_ = std::string("sensor_head_mount_link");
-  pnh_.getParam("lookat_frame", lookat_frame_);
+  pnh_.getParam("lookat_reference_frame", lookat_frame_);
   pnh_.getParam("command_goal_time_from_start", command_goal_time_from_start_);
 
   double default_interval_double = 1.0;
@@ -219,6 +220,11 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
   Eigen::Quaterniond quat(transform.getRotation().getW(), transform.getRotation().getX(),transform.getRotation().getY(),transform.getRotation().getZ());
 
 
+
+
+
+  //stab_transform.getBasis().setRPY(roll, pitch, 0.0);
+
   //std::cout << "\nquat rot\n" << rotation_.matrix() << "\nquat:\n" << quat.matrix() << "\n";
 
   rotation_ = quat * rotation_;
@@ -252,11 +258,52 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
     asin(temp[2]),
     atan2(temp[3], temp[4]));
 
+
+
+
+  tf::StampedTransform current_state_transform;
+  try{
+    transform_listener_->lookupTransform(robot_link_reference_frame_, lookat_frame_, ros::Time(0), current_state_transform);
+  }
+  catch (tf::TransformException ex){
+    ROS_WARN("Failed to transform, not sending command to joints: %s",ex.what());
+    return;
+  }
+
+  double roll, pitch, yaw;
+  current_state_transform.getBasis().getRPY(roll, pitch, yaw);
+
+  double error_yaw, error_pitch, error_roll;
+
+  switch(rotationConv)  {
+    case zyx:
+
+      error_yaw = angles::shortest_angular_distance(desAngle[0], yaw);
+      error_pitch = angles::shortest_angular_distance(desAngle[1], pitch);
+
+
+      break;
+
+    case xyz:
+
+      error_pitch = angles::shortest_angular_distance(desAngle[0], pitch);
+      error_roll = angles::shortest_angular_distance(desAngle[1], yaw);
+
+      break;
+
+    default:
+      ROS_ERROR("Invalid joint rotation convention!");
+      break;
+  }
+
   //Eigen::Vector3d angles = rotation_.matrix().eulerAngles(2, 0, 2);
 
   //std::cout << "\nangles:\n" << angles << "\n";
 
-  //std::cout << "\nangles:\n" << desAngle << "\n";
+  //std::cout << "\nangles:\n" << desAngle << "\n" << "roll_diff: " << roll << " pitch_diff: " <<  pitch << " yaw diff:" << yaw << "\n";
+
+  //std::cout << "\nangles:"  << " pitch_diff: " <<  error_pitch << " yaw diff:" << error_yaw << "\n";
+
 
   control_msgs::FollowJointTrajectoryGoal goal;
 
@@ -293,6 +340,7 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
 // NEW: Store the velocities from the ROS message
 void CamJointTrajControl::cmdCallback(const geometry_msgs::QuaternionStamped::ConstPtr& cmd_msg)
 {
+  joint_trajectory_preempted_ = true;
   current_cmd = cmd_msg;
 }
 
@@ -446,21 +494,6 @@ void CamJointTrajControl::lookAtPreemptCallback()
   look_at_server_->setPreempted();
   joint_trajectory_preempted_ = true;
 }
-
-/*
-void CamJointTrajControl::lookAtGoalCallback(actionlib::ServerGoalHandle<hector_perception_msgs::LookAtAction> goal)
-{
-
-}
-*/
-
-
-/*
-void CamJointTrajControl::lookAtPreemptCallback(actionlib::ServerGoalHandle<hector_perception_msgs::LookAtActionGoal> preempt)
-{
-
-}
-*/
 
 bool CamJointTrajControl::loadPattern(const std::string& pattern_name)
 {
