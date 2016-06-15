@@ -48,6 +48,7 @@ enum
 CamJointTrajControl::CamJointTrajControl()
   : joint_trajectory_preempted_(false)
   , patterns_param_("camera/patterns")
+  , control_mode_(MODE_OFF)
 {
   transform_listener_ = 0;
 
@@ -71,6 +72,8 @@ void CamJointTrajControl::Init()
   pnh_.getParam("default_direction_reference_frame", default_look_dir_frame_);
   pnh_.getParam("stabilize_default_direction_reference", stabilize_default_look_dir_frame_);
   pnh_.getParam("robot_link_reference_frame", robot_link_reference_frame_);
+
+  lookat_frame_ = std::string("sensor_head_mount_link");
   pnh_.getParam("lookat_frame", lookat_frame_);
   pnh_.getParam("command_goal_time_from_start", command_goal_time_from_start_);
 
@@ -78,6 +81,7 @@ void CamJointTrajControl::Init()
   pnh_.getParam("default_interval", default_interval_double);
   default_interval_ = ros::Duration(default_interval_double);
 
+  patterns_param_ = std::string(pnh_.getNamespace()+"/patterns");
   pnh_.getParam("patterns_param", patterns_param_);
 
   std::string type_string;
@@ -161,7 +165,7 @@ void CamJointTrajControl::Reset()
   current_cmd.reset();
 }
 
-bool CamJointTrajControl::ComputeDirectionForPoint(const geometry_msgs::PointStamped& lookat_point, tf::Quaternion& quaternion)
+bool CamJointTrajControl::ComputeDirectionForPoint(const geometry_msgs::PointStamped& lookat_point, geometry_msgs::QuaternionStamped& orientation)
 {
   geometry_msgs::PointStamped lookat_camera;
 
@@ -183,49 +187,23 @@ bool CamJointTrajControl::ComputeDirectionForPoint(const geometry_msgs::PointSta
     return false;
   }
 
-  geometry_msgs::QuaternionStamped orientation;
+  //geometry_msgs::QuaternionStamped orientation;
   orientation.header = lookat_camera.header;
-  orientation.header.frame_id = "base_link";
+  orientation.header.frame_id = robot_link_reference_frame_;
   tf::Vector3 dir(lookat_camera.point.x - base_camera_transform.getOrigin().x(), lookat_camera.point.y - base_camera_transform.getOrigin().y(), lookat_camera.point.z - base_camera_transform.getOrigin().z());
-  quaternion = tf::createQuaternionFromRPY(0.0, -atan2(dir.z(), sqrt(dir.x()*dir.x() + dir.y()*dir.y())), atan2(dir.y(), dir.x()));
+  tf::Quaternion quaternion = tf::createQuaternionFromRPY(0.0, -atan2(dir.z(), sqrt(dir.x()*dir.x() + dir.y()*dir.y())), atan2(dir.y(), dir.x()));
 
   //if (last_orientation.length2() == 0.0 || quaternion.angle(last_orientation) >= update_min_angle) {
-  //  tf::quaternionTFToMsg(quaternion, orientation.quaternion);
+  tf::quaternionTFToMsg(quaternion, orientation.quaternion);
   //  orientationPub.publish(orientation);
   //  last_orientation = quaternion;
   //}
   return true;
 }
 
-void CamJointTrajControl::ComputeAndSendCommand()
+void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::QuaternionStamped& command_to_use)
 {
   tf::StampedTransform transform;
-
-  geometry_msgs::QuaternionStamped command_to_use;
-
-  if(!current_cmd){
-    command_to_use.header.frame_id = default_look_dir_frame_;
-    command_to_use.quaternion.w = 1;
-  }else{
-    command_to_use = *current_cmd;
-  }
-
-  if (stabilize_default_look_dir_frame_){
-    tf::StampedTransform stab_transform;
-    try{
-      transform_listener_->lookupTransform("map", default_look_dir_frame_, ros::Time(0), stab_transform);
-    }catch (tf::TransformException ex){
-      ROS_WARN("Failed to perform stabilization, not sending command to joints: %s",ex.what());
-      return;
-    }
-
-    double roll, pitch, yaw;
-    stab_transform.getBasis().getRPY(roll, pitch, yaw);
-
-    stab_transform.getBasis().setRPY(roll, pitch, 0.0);
-
-    tf::quaternionTFToMsg(stab_transform.getRotation().inverse(), command_to_use.quaternion);
-  }
 
   try{
     transform_listener_->lookupTransform(robot_link_reference_frame_, command_to_use.header.frame_id, ros::Time(0), transform);
@@ -328,22 +306,53 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
   if (!joint_trajectory_preempted_){
 
     if (control_mode_ == MODE_LOOKAT){
-      tf::Quaternion command_quat;
+      geometry_msgs::QuaternionStamped command_quat;
 
       this->ComputeDirectionForPoint(this->lookat_point_, command_quat);
+      this->ComputeAndSendJointCommand(command_quat);
 
     }else if (control_mode_ == MODE_PATTERN){
+      ros::Time now = ros::Time::now();
 
-      if (ros::Time::now() > pattern_switch_time_){
+      if (now > pattern_switch_time_){
         pattern_index_ = (pattern_index_ + 1) % pattern_.size();
-        pattern_switch_time_ = ros::Time::now() + pattern_[pattern_index_].interval;
+        pattern_switch_time_ = now + pattern_[pattern_index_].interval;
       }
 
+      this->ComputeAndSendJointCommand(pattern_[pattern_index_].orientation);
+
+    }else if (control_mode_ == MODE_OFF){
+      //If set to stabilized in params, do it
+      if (stabilize_default_look_dir_frame_){
+
+        tf::StampedTransform stab_transform;
+        try{
+          transform_listener_->lookupTransform("map", default_look_dir_frame_, ros::Time(0), stab_transform);
+        }catch (tf::TransformException ex){
+          ROS_WARN("Failed to perform stabilization, not sending command to joints: %s",ex.what());
+          return;
+        }
+
+        double roll, pitch, yaw;
+        stab_transform.getBasis().getRPY(roll, pitch, yaw);
+
+        stab_transform.getBasis().setRPY(roll, pitch, 0.0);
+
+        geometry_msgs::QuaternionStamped command_to_use;
+        command_to_use.header.frame_id = default_look_dir_frame_;
+
+        tf::quaternionTFToMsg(stab_transform.getRotation().inverse(), command_to_use.quaternion);
+        this->ComputeAndSendJointCommand(command_to_use);
+      }
+
+
+    }else{
+      ROS_WARN("In unknown control mode %d, not commanding joints.", (int)control_mode_);
     }
 
 
 
-    this->ComputeAndSendCommand();
+    //this->ComputeAndSendCommand();
   }
 }
 
@@ -403,13 +412,14 @@ void CamJointTrajControl::lookAtGoalCallback()
 
   if (!goal->look_at_target.pattern.empty()){
     if (this->loadPattern(goal->look_at_target.pattern)){
+
+      // Setup pattern following
       control_mode_ = MODE_PATTERN;
       pattern_index_ = 0;
-
-      //pattern_timer.setPeriod(pattern_[pattern_index_].interval);
       pattern_switch_time_ = ros::Time::now() + pattern_[pattern_index_].interval;
 
     }else{
+      ROS_WARN("Unkown pattern name, not commanding joints!");
       // Keep current mode for now
       //control_mode_ = MODE_OFF;
     }
@@ -417,8 +427,6 @@ void CamJointTrajControl::lookAtGoalCallback()
     lookat_point_ = goal->look_at_target.target_point;
     control_mode_ = MODE_LOOKAT;
   }
-
-
 }
 
 
