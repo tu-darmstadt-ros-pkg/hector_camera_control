@@ -149,6 +149,7 @@ void CamJointTrajControl::Init()
   //Sleep for short time to let tf receive messages
   ros::Duration(1.0).sleep();
 
+
   look_at_server_.reset(new actionlib::SimpleActionServer<hector_perception_msgs::LookAtAction>(pnh_, "look_at", 0, false));
 
   //look_at_server_->registerGoalCallback(boost::bind(&CamJointTrajControl::lookAtGoalCallback, this, _1));
@@ -360,8 +361,18 @@ void CamJointTrajControl::transistionCb(actionlib::ClientGoalHandle<control_msgs
 {  
   std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> >::iterator it = gh_list_.begin();
 
+  //ROS_INFO("Num ghs: %d", (int)gh_list_.size());
   // Erase goal handles that are DONE
   while  (it != gh_list_.end()){
+
+    /*
+    if (it->getCommState() == actionlib::CommState::DONE ){
+      ROS_INFO("Commstate: %s  Terminalstate: %s", it->getCommState().toString().c_str(), it->getTerminalState().getText().c_str());
+    }else{
+      ROS_INFO("Commstate: %s", it->getCommState().toString().c_str());
+    }
+    */
+
     if (it->getCommState() == actionlib::CommState::DONE ){
       it = gh_list_.erase(it);
     }else{
