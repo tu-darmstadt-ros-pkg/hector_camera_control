@@ -122,7 +122,7 @@ void CamJointTrajControl::Init()
 
         // Hack to make this work in sim (otherwise time might be 0)
         //sleep(1);
-        transform_listener_->waitForTransform("map", default_look_dir_frame_, ros::Time(0), ros::Duration(2.0));
+        transform_listener_->waitForTransform("odom", default_look_dir_frame_, ros::Time(0), ros::Duration(2.0));
 
 
         srv.request.time = ros::Time::now();
@@ -405,7 +405,7 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
 
         tf::StampedTransform stab_transform;
         try{
-          transform_listener_->lookupTransform("map", default_look_dir_frame_, ros::Time(0), stab_transform);
+          transform_listener_->lookupTransform("odom", default_look_dir_frame_, ros::Time(0), stab_transform);
         }catch (tf::TransformException ex){
           ROS_WARN("Failed to perform stabilization, not sending command to joints: %s",ex.what());
           return;
