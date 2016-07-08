@@ -30,6 +30,7 @@
 
 #include <control_msgs/FollowJointTrajectoryAction.h>
 #include <angles/angles.h>
+#include <std_msgs/Float64.h>
 
 namespace cam_control {
 
@@ -50,6 +51,7 @@ CamJointTrajControl::CamJointTrajControl()
   : joint_trajectory_preempted_(false)
   , patterns_param_("camera/patterns")
   , control_mode_(MODE_OFF)
+  , use_direct_position_commands_(false)
 {
   transform_listener_ = 0;
 
@@ -63,7 +65,7 @@ CamJointTrajControl::~CamJointTrajControl()
 }
 
 // Load the controller
-void CamJointTrajControl::Init()  
+void CamJointTrajControl::Init()
 {
   pnh_ = ros::NodeHandle("~");
   nh_ = ros::NodeHandle("");
@@ -88,6 +90,9 @@ void CamJointTrajControl::Init()
   std::string type_string;
   pnh_.getParam("joint_order_type", type_string);
 
+
+  pnh_.getParam("use_direct_position_commands", use_direct_position_commands_);
+
   if (type_string == "xyz"){
     rotationConv = xyz;
   }else{
@@ -98,46 +103,53 @@ void CamJointTrajControl::Init()
 
   controller_nh_ = ros::NodeHandle(controller_namespace_);
 
-  joint_traj_client_.reset(new actionlib::ActionClient<control_msgs::FollowJointTrajectoryAction>(controller_nh_.getNamespace() + "/follow_joint_trajectory"));
+  if (use_direct_position_commands_){
+    servo_pub_1_ = nh_.advertise<std_msgs::Float64>("servo1_command", 1);
+    servo_pub_2_ = nh_.advertise<std_msgs::Float64>("servo2_command", 1);
+
+  }else{
+    joint_traj_client_.reset(new actionlib::ActionClient<control_msgs::FollowJointTrajectoryAction>(controller_nh_.getNamespace() + "/follow_joint_trajectory"));
+
+    ros::ServiceClient query_joint_traj_state_client = controller_nh_.serviceClient<control_msgs::QueryTrajectoryState>("query_state");
+
+    bool retrieved_names = false;
+
+    ROS_INFO ("Trying to retrieve state for controller namespace: %s", controller_nh_.getNamespace().c_str());
+
+    do{
+      if (query_joint_traj_state_client.waitForExistence(ros::Duration(2.0))){
+        control_msgs::QueryTrajectoryState srv;
+
+        // Hack to make this work in sim (otherwise time might be 0)
+        //sleep(1);
+        transform_listener_->waitForTransform("map", default_look_dir_frame_, ros::Time(0), ros::Duration(2.0));
+
+
+        srv.request.time = ros::Time::now();
+
+        //ROS_ERROR("Time: %d, %d", srv.request.time.sec, srv.request.time.nsec);
+        if (query_joint_traj_state_client.call(srv)){
+          latest_queried_joint_traj_state_ = srv.response;
+          retrieved_names = true;
+
+          ROS_INFO("Retrieved joint names: ");
+          for (size_t i = 0; i < latest_queried_joint_traj_state_.name.size(); ++i){
+            ROS_INFO("Joint %d : %s", static_cast<int>(i), latest_queried_joint_traj_state_.name[i].c_str());
+          }
+
+        }
+      }else{
+        ROS_ERROR("Could not retrieve controller state (and joint names), continuing to try.");
+      }
+
+    }while (!retrieved_names);
+  }
 
   // Do not retrieve joint trajectory controller state for the moment
   //joint_traj_state_sub_ = controller_nh_.subscribe("state", 1, &CamJointTrajControl::jointTrajStateCb, this);
 
   control_timer = nh_.createTimer(ros::Duration(control_rate_), &CamJointTrajControl::controlTimerCallback, this, false, true);
 
-  ros::ServiceClient query_joint_traj_state_client = controller_nh_.serviceClient<control_msgs::QueryTrajectoryState>("query_state");
-
-  bool retrieved_names = false;
-
-  ROS_INFO ("Trying to retrieve state for controller namespace: %s", controller_nh_.getNamespace().c_str());
-
-  do{
-    if (query_joint_traj_state_client.waitForExistence(ros::Duration(2.0))){
-      control_msgs::QueryTrajectoryState srv;
-
-      // Hack to make this work in sim (otherwise time might be 0)
-      //sleep(1);
-      transform_listener_->waitForTransform("map", default_look_dir_frame_, ros::Time(0), ros::Duration(2.0));
-
-
-      srv.request.time = ros::Time::now();
-
-      //ROS_ERROR("Time: %d, %d", srv.request.time.sec, srv.request.time.nsec);
-      if (query_joint_traj_state_client.call(srv)){
-        latest_queried_joint_traj_state_ = srv.response;
-        retrieved_names = true;
-
-        ROS_INFO("Retrieved joint names: ");
-        for (size_t i = 0; i < latest_queried_joint_traj_state_.name.size(); ++i){
-          ROS_INFO("Joint %d : %s", static_cast<int>(i), latest_queried_joint_traj_state_.name[i].c_str());
-        }
-
-      }
-    }else{
-      ROS_ERROR("Could not retrieve controller state (and joint names), continuing to try.");
-    }
-
-  }while (!retrieved_names);
 
   //double controlRate = 20.0;
 
@@ -317,36 +329,41 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
   //std::cout << "\nangles:"  << " pitch_diff: " <<  error_pitch << " yaw diff:" << error_yaw << "\n";
 
 
-  control_msgs::FollowJointTrajectoryGoal goal;
+  if (!use_direct_position_commands_){
+    control_msgs::FollowJointTrajectoryGoal goal;
 
-  goal.goal_time_tolerance = ros::Duration(1.0);
-  //goal.goal.path_tolerance = 1.0;
-  //goal.goal.trajectory.joint_names
+    goal.goal_time_tolerance = ros::Duration(1.0);
+    //goal.goal.path_tolerance = 1.0;
+    //goal.goal.trajectory.joint_names
 
-  goal.trajectory.joint_names = this->latest_queried_joint_traj_state_.name;
-  goal.trajectory.points.resize(1);
+    goal.trajectory.joint_names = this->latest_queried_joint_traj_state_.name;
+    goal.trajectory.points.resize(1);
 
-  goal.trajectory.points[0].positions.resize(2);
+    goal.trajectory.points[0].positions.resize(2);
 
-  goal.trajectory.points[0].positions[0] = desAngle[0];
-  goal.trajectory.points[0].positions[1] = desAngle[1];
+    goal.trajectory.points[0].positions[0] = desAngle[0];
+    goal.trajectory.points[0].positions[1] = desAngle[1];
 
-  goal.trajectory.points[0].velocities.resize(2);
+    goal.trajectory.points[0].velocities.resize(2);
 
-  goal.trajectory.points[0].velocities[0] = 0.0;
-  goal.trajectory.points[0].velocities[1] = 0.0;
+    goal.trajectory.points[0].velocities[0] = 0.0;
+    goal.trajectory.points[0].velocities[1] = 0.0;
 
-  goal.trajectory.points[0].accelerations.resize(2);
+    goal.trajectory.points[0].accelerations.resize(2);
 
-  goal.trajectory.points[0].accelerations[0] = 0.0;
-  goal.trajectory.points[0].accelerations[1] = 0.0;
+    goal.trajectory.points[0].accelerations[0] = 0.0;
+    goal.trajectory.points[0].accelerations[1] = 0.0;
 
-  goal.trajectory.points[0].time_from_start = ros::Duration(command_goal_time_from_start_);
+    goal.trajectory.points[0].time_from_start = ros::Duration(command_goal_time_from_start_);
 
-  //latest_gh_ = joint_traj_client_->sendGoal(goal);
-                               //boost::bind(&CamJointTrajControl::doneCb, this, _1, _2));
+    //latest_gh_ = joint_traj_client_->sendGoal(goal);
+    //boost::bind(&CamJointTrajControl::doneCb, this, _1, _2));
 
-  gh_list_.push_back(joint_traj_client_->sendGoal(goal, boost::bind(&CamJointTrajControl::transistionCb, this, _1)));
+    gh_list_.push_back(joint_traj_client_->sendGoal(goal, boost::bind(&CamJointTrajControl::transistionCb, this, _1)));
+  }else{
+    servo_pub_1_.publish(desAngle[0]);
+    servo_pub_2_.publish(desAngle[1]);
+  }
 }
 
 // NEW: Store the velocities from the ROS message

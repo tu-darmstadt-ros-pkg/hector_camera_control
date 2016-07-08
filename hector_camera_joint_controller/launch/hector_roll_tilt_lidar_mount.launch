@@ -13,5 +13,9 @@
     <param name="stabilize_default_direction_reference" value="true" />
 
     <param name="joint_order_type" value="xyz" />
+    <param name="use_direct_position_commands" value="true" />
+    
+    <remap from="/servo1_command" to="/stab_laser_roll_joint/command"/>
+    <remap from="/servo2_command" to="/stab_laser_pitch_joint/command"/>
   </node>
 </launch>

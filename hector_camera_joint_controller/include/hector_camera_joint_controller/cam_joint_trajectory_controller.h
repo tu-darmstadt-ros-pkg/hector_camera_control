@@ -155,6 +155,9 @@ private:
 
   std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> > gh_list_;
 
+  ros::Publisher servo_pub_1_;
+  ros::Publisher servo_pub_2_;
+
   struct PatternElement {
     geometry_msgs::QuaternionStamped orientation;
     ros::Duration interval;
@@ -165,6 +168,8 @@ private:
 
   std::string patterns_param_;
   ros::Time pattern_switch_time_;
+
+  bool use_direct_position_commands_;
 
 
 };
