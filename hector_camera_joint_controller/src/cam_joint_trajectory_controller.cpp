@@ -176,7 +176,7 @@ void CamJointTrajControl::Init()
 void CamJointTrajControl::Reset()
 {
   // Reset orientation
-  current_cmd.reset();
+  latest_orientation_cmd_.reset();
 }
 
 bool CamJointTrajControl::ComputeDirectionForPoint(const geometry_msgs::PointStamped& lookat_point, geometry_msgs::QuaternionStamped& orientation)
@@ -369,8 +369,13 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
 // NEW: Store the velocities from the ROS message
 void CamJointTrajControl::cmdCallback(const geometry_msgs::QuaternionStamped::ConstPtr& cmd_msg)
 {
-  joint_trajectory_preempted_ = true;
-  current_cmd = cmd_msg;
+  if (!joint_trajectory_preempted_){
+    joint_trajectory_preempted_ = true;
+    ROS_INFO("Preempted running goal by orientation command.");
+  }
+
+  latest_orientation_cmd_ = cmd_msg;
+  control_mode_ = MODE_ORIENTATION;
 }
 
 void CamJointTrajControl::jointTrajStateCb(const control_msgs::JointControllerState::ConstPtr& msg)
@@ -431,6 +436,15 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
 
 
     //this->ComputeAndSendCommand();
+  }else{
+    //Not in Action mode
+
+    if (control_mode_ == MODE_ORIENTATION){
+      if (latest_orientation_cmd_.get()){
+        this->ComputeAndSendJointCommand(*latest_orientation_cmd_);
+      }
+    }
+
   }
 }
 

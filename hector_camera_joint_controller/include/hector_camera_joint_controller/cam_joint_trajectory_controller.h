@@ -143,7 +143,7 @@ private:
   void cmdCallback(const geometry_msgs::QuaternionStamped::ConstPtr& cmd_msg);
 
   //boost::mutex mutex;
-  geometry_msgs::QuaternionStamped::ConstPtr current_cmd;
+  geometry_msgs::QuaternionStamped::ConstPtr latest_orientation_cmd_;
   control_msgs::JointControllerState::ConstPtr latest_joint_traj_state_;
   control_msgs::QueryTrajectoryState::Response latest_queried_joint_traj_state_;
   Eigen::Quaterniond rotation_;

@@ -17,5 +17,6 @@
     
     <remap from="/servo1_command" to="/stab_laser_roll_joint/command"/>
     <remap from="/servo2_command" to="/stab_laser_pitch_joint/command"/>
+    <remap from="/camera/command" to="/stab_laser/command"/>
   </node>
 </launch>
