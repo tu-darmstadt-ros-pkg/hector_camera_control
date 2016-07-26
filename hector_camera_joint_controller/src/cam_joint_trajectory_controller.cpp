@@ -31,6 +31,7 @@
 #include <control_msgs/FollowJointTrajectoryAction.h>
 #include <angles/angles.h>
 #include <std_msgs/Float64.h>
+#include <std_msgs/builtin_double.h>
 
 namespace cam_control {
 
