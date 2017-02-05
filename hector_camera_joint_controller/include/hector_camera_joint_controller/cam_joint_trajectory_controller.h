@@ -53,6 +53,8 @@
 
 #include <hector_perception_msgs/LookAtAction.h>
 
+
+
 // Boost
 //#include <boost/thread.hpp>
 //#include <boost/bind.hpp>
@@ -139,6 +141,8 @@ private:
   //ros::Publisher jointStatePub_;
   ros::Subscriber sub_;
   tf::TransformListener* transform_listener_;
+
+  ros::ServiceClient get_plan_service_client_;
 
   void cmdCallback(const geometry_msgs::QuaternionStamped::ConstPtr& cmd_msg);
 

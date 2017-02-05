@@ -33,6 +33,8 @@
 #include <std_msgs/Float64.h>
 #include <std_msgs/builtin_double.h>
 
+#include <moveit_msgs/GetMotionPlan.h>
+
 namespace cam_control {
 
 enum
@@ -101,6 +103,8 @@ void CamJointTrajControl::Init()
   }
 
   transform_listener_ = new tf::TransformListener();
+
+  get_plan_service_client_ = pnh_.serviceClient<moveit_msgs::GetMotionPlan>("/plan_kinematic_path");
 
   controller_nh_ = ros::NodeHandle(controller_namespace_);
 
@@ -392,8 +396,66 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
     if (control_mode_ == MODE_LOOKAT){
       geometry_msgs::QuaternionStamped command_quat;
 
-      this->ComputeDirectionForPoint(this->lookat_point_, command_quat);
-      this->ComputeAndSendJointCommand(command_quat);
+      //this->ComputeDirectionForPoint(this->lookat_point_, command_quat);
+      //this->ComputeAndSendJointCommand(command_quat);
+
+      moveit_msgs::GetMotionPlanRequest req;
+      moveit_msgs::GetMotionPlanResponse res;
+
+      moveit_msgs::VisibilityConstraint visibility;
+      visibility.cone_sides = 8;
+      visibility.sensor_pose.pose.position.x = 0.05;
+      visibility.sensor_pose.pose.orientation.w = 1;
+      visibility.max_range_angle = M_PI * 15.0 / 180.0;
+      visibility.sensor_view_direction = moveit_msgs::VisibilityConstraint::SENSOR_X;
+      visibility.weight = 1.0;
+      visibility.target_radius = 0.05;
+
+      visibility.target_pose.header.frame_id = "world";
+      visibility.sensor_pose.header.frame_id = "arm_zoom_cam_link";
+
+      visibility.sensor_pose.pose.position.x = 0.1;
+      visibility.sensor_pose.pose.orientation.w = 1.0;
+
+
+      visibility.target_pose.pose.position = this->lookat_point_.point;
+      visibility.target_pose.pose.orientation.w = 1.0;
+      //nh_combined_planner_.param<std::string>("camera_frame", cam_frame_, "arm_zoom_cam_link");
+      //constraints_.visibility_constraints.begin()->sensor_pose.header.frame_id = cam_frame_;
+      //marker_.header.frame_id = scene_->getPlanningFrame();
+
+      //req.motion_plan_request.trajectory_constraints.constraints
+
+      moveit_msgs::Constraints constraints;
+      constraints.name = "visbility";
+      constraints.visibility_constraints.push_back(visibility);
+
+      moveit_msgs::JointConstraint joint_constraint;
+      joint_constraint.joint_name = latest_queried_joint_traj_state_.name[0];
+      joint_constraint.position = 0.0;
+      joint_constraint.tolerance_above = 10;
+      joint_constraint.tolerance_below = 10;
+      joint_constraint.weight = 0.5;
+      constraints.joint_constraints.push_back(joint_constraint);
+
+      joint_constraint.joint_name = latest_queried_joint_traj_state_.name[1];
+      constraints.joint_constraints.push_back(joint_constraint);
+
+      req.motion_plan_request.group_name = "sensor_head_group";
+      req.motion_plan_request.goal_constraints.push_back(constraints);
+      req.motion_plan_request.allowed_planning_time = 0.2;
+
+      this->get_plan_service_client_.call(req, res);
+
+
+      control_msgs::FollowJointTrajectoryGoal goal;
+
+      goal.goal_time_tolerance = ros::Duration(1.0);
+
+      //goal.trajectory.joint_names = this->latest_queried_joint_traj_state_.name;
+      goal.trajectory = res.motion_plan_response.trajectory.joint_trajectory;
+
+      joint_traj_client_->sendGoal(goal);
 
     }else if (control_mode_ == MODE_PATTERN){
       ros::Time now = ros::Time::now();

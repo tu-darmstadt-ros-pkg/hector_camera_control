@@ -8,6 +8,7 @@ find_package(catkin REQUIRED COMPONENTS
   tf
   cmake_modules
   actionlib
+  moveit_msgs
   hector_perception_msgs
 )
 
