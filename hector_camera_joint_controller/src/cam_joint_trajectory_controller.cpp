@@ -395,6 +395,7 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
 
     if (control_mode_ == MODE_LOOKAT){
 
+      //lookat_oneshot_ = true;
 
       if (lookat_oneshot_){
         std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> >::iterator it = gh_list_.begin();
@@ -430,7 +431,7 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
       visibility.weight = 1.0;
       visibility.target_radius = 0.05;
 
-      visibility.target_pose.header.frame_id = "world";
+      visibility.target_pose.header.frame_id = this->lookat_point_.header.frame_id;
       visibility.sensor_pose.header.frame_id = "arm_zoom_cam_link";
 
       visibility.sensor_pose.pose.position.x = 0.1;
@@ -475,6 +476,8 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
         ROS_WARN("Plan result error code is %d, aborting.", (int)res.motion_plan_response.error_code.val);
         return;
       }
+
+      ROS_INFO("Plan retrieved successfully");
 
 
       control_msgs::FollowJointTrajectoryGoal goal;
@@ -548,33 +551,54 @@ void CamJointTrajControl::transistionCb(actionlib::ClientGoalHandle<control_msgs
 {  
   std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> >::iterator it = gh_list_.begin();
 
-  //ROS_INFO("Num ghs: %d", (int)gh_list_.size());
+  ROS_INFO("----------------Num ghs: %d --------------", (int)gh_list_.size());
   // Erase goal handles that are DONE
 
-  //CommState latest_comm_state;
+  //actionlib::CommState latest_comm_state;
+  //actionlib::TerminalState latest_term_state;
 
   while  (it != gh_list_.end()){
 
-    /*
+
     if (it->getCommState() == actionlib::CommState::DONE ){
-      ROS_INFO("Commstate: %s  Terminalstate: %s", it->getCommState().toString().c_str(), it->getTerminalState().getText().c_str());
+      ROS_INFO("Commstate: %s  Terminalstate: %s", it->getCommState().toString().c_str(), it->getTerminalState().toString().c_str());
     }else{
       ROS_INFO("Commstate: %s", it->getCommState().toString().c_str());
     }
-    */
 
     //latest_comm_state = it->getCommState();
 
+
     if (it->getCommState() == actionlib::CommState::DONE ){
+      if (it->getTerminalState() == actionlib::TerminalState::PREEMPTED){
+        ROS_INFO("Preempted traj controller aborting action");
+
+        joint_trajectory_preempted_ = true;
+
+        if (look_at_server_->isActive()){
+          look_at_server_->setPreempted();
+        }
+      }
+
       it = gh_list_.erase(it);
     }else{
       ++it;
+    }    
+  }
+
+  if (gh_list_.size() == 0){
+
+    if (look_at_server_->isActive()){
+      control_mode_ = MODE_OFF;
+      look_at_server_->setSucceeded();
     }
   }
 
   // If there are no goal handles left after we erased the ones that are DONE,
   // this means our last sent one got preempted by the server as someone else
   // took control of the server. In that case, cease sending new actions.
+
+  /*
   if (gh_list_.size() == 0){
     ROS_INFO("Current joint action command got preempted, cancelling sending commands.");
     joint_trajectory_preempted_ = true;
@@ -583,10 +607,12 @@ void CamJointTrajControl::transistionCb(actionlib::ClientGoalHandle<control_msgs
       look_at_server_->setPreempted();
     }
   }
+  */
 
   // Uncomment below for debugging
-  /*
+
   ROS_INFO("-------------");
+  /*
   for (std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> >::iterator it = gh_list_.begin(); it != gh_list_.end(); ++it){
 
 
@@ -628,7 +654,7 @@ void CamJointTrajControl::lookAtGoalCallback()
     }
   }else{
     lookat_point_ = goal->look_at_target.target_point;
-    lookat_oneshot_ = !goal->look_at_target.no_continuous_tracking;
+    lookat_oneshot_ = goal->look_at_target.no_continuous_tracking;
     control_mode_ = MODE_LOOKAT;
   }
 }
@@ -638,6 +664,7 @@ void CamJointTrajControl::lookAtPreemptCallback()
 {
   look_at_server_->setPreempted();
   joint_trajectory_preempted_ = true;
+  control_mode_ = MODE_OFF;
 }
 
 bool CamJointTrajControl::loadPattern(const std::string& pattern_name)
