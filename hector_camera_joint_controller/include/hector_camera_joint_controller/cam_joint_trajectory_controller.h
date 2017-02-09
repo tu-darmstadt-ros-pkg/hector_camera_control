@@ -159,6 +159,8 @@ private:
 
   std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> > gh_list_;
 
+  ros::Time last_plan_time_;
+
   ros::Publisher servo_pub_1_;
   ros::Publisher servo_pub_2_;
 

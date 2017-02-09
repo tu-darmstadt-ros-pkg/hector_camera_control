@@ -394,7 +394,26 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
   if (!joint_trajectory_preempted_){
 
     if (control_mode_ == MODE_LOOKAT){
-      geometry_msgs::QuaternionStamped command_quat;
+
+
+      if (lookat_oneshot_){
+        std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> >::iterator it = gh_list_.begin();
+
+        while  (it != gh_list_.end()){
+
+          if (it->getCommState() == actionlib::CommState::ACTIVE ){
+            ROS_INFO("Controller active, waiting to return");
+            return;
+          }
+          it++;
+        }
+      }else{
+        if ((ros::Time::now() - last_plan_time_).toSec() < 0.2){
+          ROS_INFO("Replanning at 5 Hz");
+          return;
+        }
+
+      }
 
       //this->ComputeDirectionForPoint(this->lookat_point_, command_quat);
       //this->ComputeAndSendJointCommand(command_quat);
@@ -403,10 +422,10 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
       moveit_msgs::GetMotionPlanResponse res;
 
       moveit_msgs::VisibilityConstraint visibility;
-      visibility.cone_sides = 8;
-      visibility.sensor_pose.pose.position.x = 0.05;
-      visibility.sensor_pose.pose.orientation.w = 1;
-      visibility.max_range_angle = M_PI * 15.0 / 180.0;
+      visibility.cone_sides = 4;
+
+      visibility.max_view_angle = 0.0;
+      visibility.max_range_angle = M_PI * 5.0 / 180.0;
       visibility.sensor_view_direction = moveit_msgs::VisibilityConstraint::SENSOR_X;
       visibility.weight = 1.0;
       visibility.target_radius = 0.05;
@@ -433,8 +452,8 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
       moveit_msgs::JointConstraint joint_constraint;
       joint_constraint.joint_name = latest_queried_joint_traj_state_.name[0];
       joint_constraint.position = 0.0;
-      joint_constraint.tolerance_above = 10;
-      joint_constraint.tolerance_below = 10;
+      joint_constraint.tolerance_above = M_PI;
+      joint_constraint.tolerance_below = M_PI;
       joint_constraint.weight = 0.5;
       constraints.joint_constraints.push_back(joint_constraint);
 
@@ -445,7 +464,17 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
       req.motion_plan_request.goal_constraints.push_back(constraints);
       req.motion_plan_request.allowed_planning_time = 0.2;
 
-      this->get_plan_service_client_.call(req, res);
+      bool plan_retrieval_success = this->get_plan_service_client_.call(req, res);
+
+      if (!plan_retrieval_success){
+        ROS_WARN("Planning service returned false, aborting");
+        return;
+      }
+
+      if (!(res.motion_plan_response.error_code.val == moveit_msgs::MoveItErrorCodes::SUCCESS) ){
+        ROS_WARN("Plan result error code is %d, aborting.", (int)res.motion_plan_response.error_code.val);
+        return;
+      }
 
 
       control_msgs::FollowJointTrajectoryGoal goal;
@@ -454,8 +483,12 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
 
       //goal.trajectory.joint_names = this->latest_queried_joint_traj_state_.name;
       goal.trajectory = res.motion_plan_response.trajectory.joint_trajectory;
+      //goal.trajectory.header.stamp = ros::Time::now() + ros::Duration(0.025);
+      goal.trajectory.header.stamp = ros::Time::now();
 
-      joint_traj_client_->sendGoal(goal);
+      last_plan_time_ = ros::Time::now();
+
+      gh_list_.push_back(joint_traj_client_->sendGoal(goal, boost::bind(&CamJointTrajControl::transistionCb, this, _1)));
 
     }else if (control_mode_ == MODE_PATTERN){
       ros::Time now = ros::Time::now();
@@ -517,6 +550,9 @@ void CamJointTrajControl::transistionCb(actionlib::ClientGoalHandle<control_msgs
 
   //ROS_INFO("Num ghs: %d", (int)gh_list_.size());
   // Erase goal handles that are DONE
+
+  //CommState latest_comm_state;
+
   while  (it != gh_list_.end()){
 
     /*
@@ -527,6 +563,8 @@ void CamJointTrajControl::transistionCb(actionlib::ClientGoalHandle<control_msgs
     }
     */
 
+    //latest_comm_state = it->getCommState();
+
     if (it->getCommState() == actionlib::CommState::DONE ){
       it = gh_list_.erase(it);
     }else{
@@ -535,7 +573,7 @@ void CamJointTrajControl::transistionCb(actionlib::ClientGoalHandle<control_msgs
   }
 
   // If there are no goal handles left after we erased the ones that are DONE,
-  // this means our last send one got preempted by the server as someone else
+  // this means our last sent one got preempted by the server as someone else
   // took control of the server. In that case, cease sending new actions.
   if (gh_list_.size() == 0){
     ROS_INFO("Current joint action command got preempted, cancelling sending commands.");
