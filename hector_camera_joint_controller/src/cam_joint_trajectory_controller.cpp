@@ -55,6 +55,7 @@ CamJointTrajControl::CamJointTrajControl()
   , patterns_param_("camera/patterns")
   , control_mode_(MODE_OFF)
   , use_direct_position_commands_(false)
+  , new_goal_received_(false)
 {
   transform_listener_ = 0;
 
@@ -137,9 +138,9 @@ void CamJointTrajControl::Init()
           latest_queried_joint_traj_state_ = srv.response;
           retrieved_names = true;
 
-          ROS_INFO("Retrieved joint names: ");
+          ROS_INFO("[cam joint ctrl] Retrieved joint names: ");
           for (size_t i = 0; i < latest_queried_joint_traj_state_.name.size(); ++i){
-            ROS_INFO("Joint %d : %s", static_cast<int>(i), latest_queried_joint_traj_state_.name[i].c_str());
+            ROS_INFO("[cam joint ctrl] Joint %d : %s", static_cast<int>(i), latest_queried_joint_traj_state_.name[i].c_str());
           }
 
         }
@@ -376,7 +377,7 @@ void CamJointTrajControl::cmdCallback(const geometry_msgs::QuaternionStamped::Co
 {
   if (!joint_trajectory_preempted_){
     joint_trajectory_preempted_ = true;
-    ROS_INFO("Preempted running goal by orientation command.");
+    ROS_INFO("[cam joint ctrl] Preempted running goal by orientation command.");
   }
 
   latest_orientation_cmd_ = cmd_msg;
@@ -397,24 +398,29 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
 
       //lookat_oneshot_ = true;
 
-      if (lookat_oneshot_){
-        std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> >::iterator it = gh_list_.begin();
 
-        while  (it != gh_list_.end()){
+      if (!new_goal_received_){
+        if (lookat_oneshot_){
+          std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> >::iterator it = gh_list_.begin();
 
-          if (it->getCommState() == actionlib::CommState::ACTIVE ){
-            ROS_INFO("Controller active, waiting to return");
+          while  (it != gh_list_.end()){
+
+            if (it->getCommState() == actionlib::CommState::ACTIVE ){
+              ROS_DEBUG("Controller active, waiting to return");
+              return;
+            }
+            it++;
+          }
+        }else{
+          if ((ros::Time::now() - last_plan_time_).toSec() < 0.2){
+            ROS_DEBUG("Replanning at 5 Hz");
             return;
           }
-          it++;
-        }
-      }else{
-        if ((ros::Time::now() - last_plan_time_).toSec() < 0.2){
-          ROS_INFO("Replanning at 5 Hz");
-          return;
-        }
 
+        }
       }
+
+      new_goal_received_ = false;
 
       //this->ComputeDirectionForPoint(this->lookat_point_, command_quat);
       //this->ComputeAndSendJointCommand(command_quat);
@@ -468,16 +474,16 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
       bool plan_retrieval_success = this->get_plan_service_client_.call(req, res);
 
       if (!plan_retrieval_success){
-        ROS_WARN("Planning service returned false, aborting");
+        ROS_WARN("[cam joint ctrl] Planning service returned false, aborting");
         return;
       }
 
       if (!(res.motion_plan_response.error_code.val == moveit_msgs::MoveItErrorCodes::SUCCESS) ){
-        ROS_WARN("Plan result error code is %d, aborting.", (int)res.motion_plan_response.error_code.val);
+        ROS_WARN("[cam joint ctrl] Plan result error code is %d, aborting.", (int)res.motion_plan_response.error_code.val);
         return;
       }
 
-      ROS_INFO("Plan retrieved successfully");
+      ROS_DEBUG("[cam joint ctrl] Plan retrieved successfully");
 
 
       control_msgs::FollowJointTrajectoryGoal goal;
@@ -551,7 +557,7 @@ void CamJointTrajControl::transistionCb(actionlib::ClientGoalHandle<control_msgs
 {  
   std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> >::iterator it = gh_list_.begin();
 
-  ROS_INFO("----------------Num ghs: %d --------------", (int)gh_list_.size());
+  ROS_DEBUG("----------------Num ghs: %d --------------", (int)gh_list_.size());
   // Erase goal handles that are DONE
 
   //actionlib::CommState latest_comm_state;
@@ -561,17 +567,30 @@ void CamJointTrajControl::transistionCb(actionlib::ClientGoalHandle<control_msgs
 
 
     if (it->getCommState() == actionlib::CommState::DONE ){
-      ROS_INFO("Commstate: %s  Terminalstate: %s", it->getCommState().toString().c_str(), it->getTerminalState().toString().c_str());
+      ROS_DEBUG("Commstate: %s  Terminalstate: %s", it->getCommState().toString().c_str(), it->getTerminalState().toString().c_str());
     }else{
-      ROS_INFO("Commstate: %s", it->getCommState().toString().c_str());
+      ROS_DEBUG("Commstate: %s", it->getCommState().toString().c_str());
     }
 
     //latest_comm_state = it->getCommState();
 
 
     if (it->getCommState() == actionlib::CommState::DONE ){
+      /*
       if (it->getTerminalState() == actionlib::TerminalState::PREEMPTED){
-        ROS_INFO("Preempted traj controller aborting action");
+        ROS_INFO("Preempted traj controller, aborting action");
+
+        joint_trajectory_preempted_ = true;
+
+        if (look_at_server_->isActive()){
+          look_at_server_->setPreempted();
+        }
+      }
+      */
+
+      if ((gh_list_.size() == 1) && (it->getTerminalState() == actionlib::TerminalState::PREEMPTED) && !new_goal_received_)
+      {
+        ROS_INFO("[cam joint ctrl] Preempted by traj controller, aborting lookat");
 
         joint_trajectory_preempted_ = true;
 
@@ -586,7 +605,9 @@ void CamJointTrajControl::transistionCb(actionlib::ClientGoalHandle<control_msgs
     }    
   }
 
-  if (gh_list_.size() == 0){
+
+  // If we're done and have not requested continuous replanning, set succeeded.
+  if ((gh_list_.size() == 0) && lookat_oneshot_ && !new_goal_received_){
 
     if (look_at_server_->isActive()){
       control_mode_ = MODE_OFF;
@@ -611,7 +632,7 @@ void CamJointTrajControl::transistionCb(actionlib::ClientGoalHandle<control_msgs
 
   // Uncomment below for debugging
 
-  ROS_INFO("-------------");
+  ROS_DEBUG("-------------");
   /*
   for (std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> >::iterator it = gh_list_.begin(); it != gh_list_.end(); ++it){
 
@@ -648,7 +669,7 @@ void CamJointTrajControl::lookAtGoalCallback()
       pattern_switch_time_ = ros::Time::now() + pattern_[pattern_index_].interval;
 
     }else{
-      ROS_WARN("Unkown pattern name, not commanding joints!");
+      ROS_WARN("Unknown pattern name, not commanding joints!");
       // Keep current mode for now
       //control_mode_ = MODE_OFF;
     }
@@ -656,15 +677,30 @@ void CamJointTrajControl::lookAtGoalCallback()
     lookat_point_ = goal->look_at_target.target_point;
     lookat_oneshot_ = goal->look_at_target.no_continuous_tracking;
     control_mode_ = MODE_LOOKAT;
+
+    new_goal_received_ = true;
   }
 }
 
 
 void CamJointTrajControl::lookAtPreemptCallback()
 {
+  ROS_INFO("[cam joint ctrl] Preempt Callback");
   look_at_server_->setPreempted();
   joint_trajectory_preempted_ = true;
+  this->stopControllerTrajExecution();
   control_mode_ = MODE_OFF;
+}
+
+void CamJointTrajControl::stopControllerTrajExecution()
+{
+  if (gh_list_.size() > 0){
+    ROS_INFO("[cam joint ctrl] Setting controller to cancelled");
+    joint_traj_client_->cancelAllGoals();
+    //gh_list_.rbegin()->setCanceled();
+  }
+
+  //joint_traj_client_->cancelAllGoals();
 }
 
 bool CamJointTrajControl::loadPattern(const std::string& pattern_name)
@@ -685,7 +721,7 @@ bool CamJointTrajControl::loadPattern(const std::string& pattern_name)
     if (!description[i].hasMember("name") || description[i]["name"] != pattern_name) continue;
     if (!description[i].hasMember("pattern")) continue;
 
-    ROS_INFO("Loaded pattern %s!", pattern_name.c_str());
+    ROS_INFO("[cam joint ctrl] Loaded pattern %s!", pattern_name.c_str());
 
     if (description[i].hasMember("frame_id")) element.orientation.header.frame_id = std::string(description[i]["frame_id"]);
     if (description[i].hasMember("interval")) interval = ros::Duration(description[i]["interval"]);
