@@ -412,8 +412,8 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
             it++;
           }
         }else{
-          if ((ros::Time::now() - last_plan_time_).toSec() < 0.2){
-            ROS_DEBUG("Replanning at 5 Hz");
+          if ((ros::Time::now() - last_plan_time_).toSec() < 0.8){
+            ROS_DEBUG("Replanning with fixed rate, skipping current iteration");
             return;
           }
 
