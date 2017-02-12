@@ -188,6 +188,85 @@ void CamJointTrajControl::Reset()
   latest_orientation_cmd_.reset();
 }
 
+bool CamJointTrajControl::planAndMoveToPoint(const geometry_msgs::PointStamped& point)
+{
+  moveit_msgs::GetMotionPlanRequest req;
+  moveit_msgs::GetMotionPlanResponse res;
+
+  moveit_msgs::VisibilityConstraint visibility;
+  visibility.cone_sides = 4;
+
+  visibility.max_view_angle = 0.0;
+  visibility.max_range_angle = M_PI * 5.0 / 180.0;
+  visibility.sensor_view_direction = moveit_msgs::VisibilityConstraint::SENSOR_X;
+  visibility.weight = 1.0;
+  visibility.target_radius = 0.05;
+
+  visibility.target_pose.header.frame_id = point.header.frame_id;
+  visibility.sensor_pose.header.frame_id = "arm_zoom_cam_link";
+
+  visibility.sensor_pose.pose.position.x = 0.1;
+  visibility.sensor_pose.pose.orientation.w = 1.0;
+
+
+  visibility.target_pose.pose.position = point.point;
+  visibility.target_pose.pose.orientation.w = 1.0;
+  //nh_combined_planner_.param<std::string>("camera_frame", cam_frame_, "arm_zoom_cam_link");
+  //constraints_.visibility_constraints.begin()->sensor_pose.header.frame_id = cam_frame_;
+  //marker_.header.frame_id = scene_->getPlanningFrame();
+
+  //req.motion_plan_request.trajectory_constraints.constraints
+
+  moveit_msgs::Constraints constraints;
+  constraints.name = "visbility";
+  constraints.visibility_constraints.push_back(visibility);
+
+  moveit_msgs::JointConstraint joint_constraint;
+  joint_constraint.joint_name = latest_queried_joint_traj_state_.name[0];
+  joint_constraint.position = 0.0;
+  joint_constraint.tolerance_above = M_PI;
+  joint_constraint.tolerance_below = M_PI;
+  joint_constraint.weight = 0.5;
+  constraints.joint_constraints.push_back(joint_constraint);
+
+  joint_constraint.joint_name = latest_queried_joint_traj_state_.name[1];
+  constraints.joint_constraints.push_back(joint_constraint);
+
+  req.motion_plan_request.group_name = "sensor_head_group";
+  req.motion_plan_request.goal_constraints.push_back(constraints);
+  req.motion_plan_request.allowed_planning_time = 0.2;
+
+  bool plan_retrieval_success = this->get_plan_service_client_.call(req, res);
+
+  if (!plan_retrieval_success){
+    ROS_WARN("[cam joint ctrl] Planning service returned false, aborting");
+    return false;
+  }
+
+  if (!(res.motion_plan_response.error_code.val == moveit_msgs::MoveItErrorCodes::SUCCESS) ){
+    ROS_WARN("[cam joint ctrl] Plan result error code is %d, aborting.", (int)res.motion_plan_response.error_code.val);
+    return false;
+  }
+
+  ROS_DEBUG("[cam joint ctrl] Plan retrieved successfully");
+
+
+  control_msgs::FollowJointTrajectoryGoal goal;
+
+  goal.goal_time_tolerance = ros::Duration(1.0);
+
+  //goal.trajectory.joint_names = this->latest_queried_joint_traj_state_.name;
+  goal.trajectory = res.motion_plan_response.trajectory.joint_trajectory;
+  //goal.trajectory.header.stamp = ros::Time::now() + ros::Duration(0.025);
+  goal.trajectory.header.stamp = ros::Time::now();
+
+  last_plan_time_ = ros::Time::now();
+
+  gh_list_.push_back(joint_traj_client_->sendGoal(goal, boost::bind(&CamJointTrajControl::transistionCb, this, _1)));
+
+  return true;
+}
+
 bool CamJointTrajControl::ComputeDirectionForPoint(const geometry_msgs::PointStamped& lookat_point, geometry_msgs::QuaternionStamped& orientation)
 {
   geometry_msgs::PointStamped lookat_camera;
@@ -425,82 +504,12 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
 
       new_goal_received_ = false;
 
+      this->planAndMoveToPoint(this->lookat_point_);
+
       //this->ComputeDirectionForPoint(this->lookat_point_, command_quat);
       //this->ComputeAndSendJointCommand(command_quat);
 
-      moveit_msgs::GetMotionPlanRequest req;
-      moveit_msgs::GetMotionPlanResponse res;
 
-      moveit_msgs::VisibilityConstraint visibility;
-      visibility.cone_sides = 4;
-
-      visibility.max_view_angle = 0.0;
-      visibility.max_range_angle = M_PI * 5.0 / 180.0;
-      visibility.sensor_view_direction = moveit_msgs::VisibilityConstraint::SENSOR_X;
-      visibility.weight = 1.0;
-      visibility.target_radius = 0.05;
-
-      visibility.target_pose.header.frame_id = this->lookat_point_.header.frame_id;
-      visibility.sensor_pose.header.frame_id = "arm_zoom_cam_link";
-
-      visibility.sensor_pose.pose.position.x = 0.1;
-      visibility.sensor_pose.pose.orientation.w = 1.0;
-
-
-      visibility.target_pose.pose.position = this->lookat_point_.point;
-      visibility.target_pose.pose.orientation.w = 1.0;
-      //nh_combined_planner_.param<std::string>("camera_frame", cam_frame_, "arm_zoom_cam_link");
-      //constraints_.visibility_constraints.begin()->sensor_pose.header.frame_id = cam_frame_;
-      //marker_.header.frame_id = scene_->getPlanningFrame();
-
-      //req.motion_plan_request.trajectory_constraints.constraints
-
-      moveit_msgs::Constraints constraints;
-      constraints.name = "visbility";
-      constraints.visibility_constraints.push_back(visibility);
-
-      moveit_msgs::JointConstraint joint_constraint;
-      joint_constraint.joint_name = latest_queried_joint_traj_state_.name[0];
-      joint_constraint.position = 0.0;
-      joint_constraint.tolerance_above = M_PI;
-      joint_constraint.tolerance_below = M_PI;
-      joint_constraint.weight = 0.5;
-      constraints.joint_constraints.push_back(joint_constraint);
-
-      joint_constraint.joint_name = latest_queried_joint_traj_state_.name[1];
-      constraints.joint_constraints.push_back(joint_constraint);
-
-      req.motion_plan_request.group_name = "sensor_head_group";
-      req.motion_plan_request.goal_constraints.push_back(constraints);
-      req.motion_plan_request.allowed_planning_time = 0.2;
-
-      bool plan_retrieval_success = this->get_plan_service_client_.call(req, res);
-
-      if (!plan_retrieval_success){
-        ROS_WARN("[cam joint ctrl] Planning service returned false, aborting");
-        return;
-      }
-
-      if (!(res.motion_plan_response.error_code.val == moveit_msgs::MoveItErrorCodes::SUCCESS) ){
-        ROS_WARN("[cam joint ctrl] Plan result error code is %d, aborting.", (int)res.motion_plan_response.error_code.val);
-        return;
-      }
-
-      ROS_DEBUG("[cam joint ctrl] Plan retrieved successfully");
-
-
-      control_msgs::FollowJointTrajectoryGoal goal;
-
-      goal.goal_time_tolerance = ros::Duration(1.0);
-
-      //goal.trajectory.joint_names = this->latest_queried_joint_traj_state_.name;
-      goal.trajectory = res.motion_plan_response.trajectory.joint_trajectory;
-      //goal.trajectory.header.stamp = ros::Time::now() + ros::Duration(0.025);
-      goal.trajectory.header.stamp = ros::Time::now();
-
-      last_plan_time_ = ros::Time::now();
-
-      gh_list_.push_back(joint_traj_client_->sendGoal(goal, boost::bind(&CamJointTrajControl::transistionCb, this, _1)));
 
     }else if (control_mode_ == MODE_PATTERN){
       ros::Time now = ros::Time::now();
@@ -510,7 +519,7 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
         pattern_switch_time_ = now + pattern_[pattern_index_].interval;
       }
 
-      this->ComputeAndSendJointCommand(pattern_[pattern_index_].orientation);
+      //this->ComputeAndSendJointCommand(pattern_[pattern_index_].orientation);
 
     }else if (control_mode_ == MODE_OFF){
       //If set to stabilized in params, do it
@@ -664,6 +673,8 @@ void CamJointTrajControl::lookAtGoalCallback()
   joint_trajectory_preempted_ = false;
 
   if (!goal->look_at_target.pattern.empty()){
+
+
     if (this->loadPattern(goal->look_at_target.pattern)){
 
       // Setup pattern following
@@ -674,7 +685,7 @@ void CamJointTrajControl::lookAtGoalCallback()
     }else{
       ROS_WARN("Unknown pattern name, not commanding joints!");
       // Keep current mode for now
-      //control_mode_ = MODE_OFF;
+      control_mode_ = MODE_OFF;
     }
   }else{
     lookat_point_ = goal->look_at_target.target_point;
