@@ -95,6 +95,8 @@ private:
 
   void stopControllerTrajExecution();
 
+  bool loadPatterns();
+
   bool loadPattern(const std::string& pattern_name);
 
 
@@ -171,6 +173,15 @@ private:
     geometry_msgs::QuaternionStamped orientation;
     ros::Duration interval;
   };
+
+  struct TargetPointPatternElement{
+    geometry_msgs::PointStamped target_point;
+    ros::Duration stay_time;
+    double goto_velocity_factor;
+  };
+
+  std::map<std::string, std::vector<TargetPointPatternElement> > patterns_;
+
   std::vector<PatternElement> pattern_;
   unsigned int pattern_index_;
   ros::Duration default_interval_;

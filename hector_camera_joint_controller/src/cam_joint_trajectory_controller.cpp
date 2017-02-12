@@ -103,6 +103,9 @@ void CamJointTrajControl::Init()
     rotationConv = zyx;
   }
 
+
+  this->loadPatterns();
+
   transform_listener_ = new tf::TransformListener();
 
   get_plan_service_client_ = pnh_.serviceClient<moveit_msgs::GetMotionPlan>("/plan_kinematic_path");
@@ -702,6 +705,54 @@ void CamJointTrajControl::stopControllerTrajExecution()
 
   //joint_traj_client_->cancelAllGoals();
 }
+
+bool CamJointTrajControl::loadPatterns()
+{
+  ros::NodeHandle nh;
+
+  pattern_.clear();
+
+  XmlRpc::XmlRpcValue description;
+  ros::Duration interval(default_interval_);
+
+  if (!nh.getParamCached(patterns_param_, description)) return false;
+
+  for(int i = 0; i < description.size(); ++i) {
+
+      if (description[i].hasMember("name")){
+
+          ROS_INFO("name: %s", std::string(description[i]["name"]).c_str());
+      }else{
+        ROS_ERROR("Pattern element has no name, skipping.");
+        continue;
+      }
+
+      std::string name = std::string(description[i]["name"]);
+
+    std::vector<TargetPointPatternElement>& waypoint_vec = patterns_[name];
+
+    for(int j = 0; j < description[i]["waypoints"].size(); ++j) {
+      XmlRpc::XmlRpcValue& element_description = description[i]["waypoints"][j];
+
+      TargetPointPatternElement element;
+
+      element.target_point.header.frame_id  = std::string(element_description["frame_id"]);
+      element.stay_time = ros::Duration(element_description["stay_time"]);
+      element.goto_velocity_factor = element_description["goto_velocity_factor"];
+
+      element.target_point.point.x = (double) element_description["target_point"][0];
+      element.target_point.point.y = (double) element_description["target_point"][1];
+      element.target_point.point.z = (double) element_description["target_point"][2];
+
+      waypoint_vec.push_back(element);
+    }
+  }
+
+
+
+ return true;
+}
+
 
 bool CamJointTrajControl::loadPattern(const std::string& pattern_name)
 {
