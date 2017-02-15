@@ -99,7 +99,7 @@ private:
 
   bool loadPatterns();
 
-  bool loadPattern(const std::string& pattern_name);
+  bool findPattern(const std::string& pattern_name);
 
 
 private:
@@ -184,8 +184,10 @@ private:
 
   std::map<std::string, std::vector<TargetPointPatternElement> > patterns_;
 
-  std::vector<PatternElement> pattern_;
+  //std::vector<PatternElement> pattern_;
   unsigned int pattern_index_;
+  std::string current_pattern_name_;
+
   ros::Duration default_interval_;
 
   std::string patterns_param_;

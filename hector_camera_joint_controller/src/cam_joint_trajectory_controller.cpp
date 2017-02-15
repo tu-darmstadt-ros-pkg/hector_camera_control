@@ -513,10 +513,35 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
 
     }else if (control_mode_ == MODE_PATTERN){
       ros::Time now = ros::Time::now();
+      
+      /*
+      std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> >::iterator it = gh_list_.begin();
 
-      if (now > pattern_switch_time_){
-        pattern_index_ = (pattern_index_ + 1) % pattern_.size();
-        pattern_switch_time_ = now + pattern_[pattern_index_].interval;
+
+      while  (it != gh_list_.end()){
+
+        if (it->getCommState() == actionlib::CommState::ACTIVE ){
+          ROS_INFO("Controller active, waiting to return");
+          return;
+        }
+        it++;
+      }
+      */
+      
+
+      if ((gh_list_.size() == 0) && (now > pattern_switch_time_)){
+        ROS_INFO("Planning to next target point with index %d", (int) pattern_index_);
+          
+
+        const std::vector<TargetPointPatternElement>& curr_pattern = patterns_.at(current_pattern_name_);
+        const TargetPointPatternElement& curr_target = curr_pattern[pattern_index_];
+
+        this->planAndMoveToPoint(curr_target.target_point);
+        return;
+
+      }else{
+        ROS_INFO("Not yet finished");
+        return;
       }
 
       //this->ComputeAndSendJointCommand(pattern_[pattern_index_].orientation);
@@ -619,13 +644,23 @@ void CamJointTrajControl::transistionCb(actionlib::ClientGoalHandle<control_msgs
 
 
   // If we're done and have not requested continuous replanning, set succeeded.
-  if ((gh_list_.size() == 0) && lookat_oneshot_ && !new_goal_received_){
+  if ((gh_list_.size() == 0) && lookat_oneshot_ && !new_goal_received_ && !(control_mode_ == MODE_PATTERN)){
 
     if (look_at_server_->isActive()){
       control_mode_ = MODE_OFF;
       look_at_server_->setSucceeded();
     }
+  }else if((gh_list_.size() == 0) && control_mode_ == MODE_PATTERN){
+
+    ROS_INFO("In pattern mode and handle complete, switching to next index");
+
+    const std::vector<TargetPointPatternElement>& curr_pattern = patterns_.at(current_pattern_name_);
+    //const TargetPointPatternElement& curr_target = curr_pattern[pattern_index_];
+
+    pattern_index_ = (pattern_index_ + 1) % curr_pattern.size();
+    pattern_switch_time_ = ros::Time::now() + curr_pattern[pattern_index_].stay_time;
   }
+    
 
   // If there are no goal handles left after we erased the ones that are DONE,
   // this means our last sent one got preempted by the server as someone else
@@ -675,15 +710,16 @@ void CamJointTrajControl::lookAtGoalCallback()
   if (!goal->look_at_target.pattern.empty()){
 
 
-    if (this->loadPattern(goal->look_at_target.pattern)){
+    if (this->findPattern(goal->look_at_target.pattern)){
 
       // Setup pattern following
+      current_pattern_name_ = goal->look_at_target.pattern;
       control_mode_ = MODE_PATTERN;
       pattern_index_ = 0;
-      pattern_switch_time_ = ros::Time::now() + pattern_[pattern_index_].interval;
+      pattern_switch_time_ = ros::Time(0);
 
     }else{
-      ROS_WARN("Unknown pattern name, not commanding joints!");
+      ROS_WARN("Unknown pattern name %s, not commanding joints!", goal->look_at_target.pattern.c_str());
       // Keep current mode for now
       control_mode_ = MODE_OFF;
     }
@@ -721,24 +757,28 @@ bool CamJointTrajControl::loadPatterns()
 {
   ros::NodeHandle nh;
 
-  pattern_.clear();
+  patterns_.clear();
 
   XmlRpc::XmlRpcValue description;
   ros::Duration interval(default_interval_);
 
-  if (!nh.getParamCached(patterns_param_, description)) return false;
+  if (!nh.getParamCached(patterns_param_, description))
+  {
+    ROS_ERROR("Could not find patterns param! Not loading any.");
+      return false;
+  }
 
   for(int i = 0; i < description.size(); ++i) {
 
-      if (description[i].hasMember("name")){
+    if (description[i].hasMember("name")){
 
-          ROS_INFO("name: %s", std::string(description[i]["name"]).c_str());
-      }else{
-        ROS_ERROR("Pattern element has no name, skipping.");
-        continue;
-      }
+      ROS_INFO("name: %s", std::string(description[i]["name"]).c_str());
+    }else{
+      ROS_ERROR("Pattern element has no name, skipping.");
+      continue;
+    }
 
-      std::string name = std::string(description[i]["name"]);
+    std::string name = std::string(description[i]["name"]);
 
     std::vector<TargetPointPatternElement>& waypoint_vec = patterns_[name];
 
@@ -757,6 +797,10 @@ bool CamJointTrajControl::loadPatterns()
 
       waypoint_vec.push_back(element);
     }
+    if (waypoint_vec.size() == 0){
+      ROS_ERROR("Camera pattern with no waypoints!");
+    }
+
   }
 
 
@@ -765,43 +809,15 @@ bool CamJointTrajControl::loadPatterns()
 }
 
 
-bool CamJointTrajControl::loadPattern(const std::string& pattern_name)
+bool CamJointTrajControl::findPattern(const std::string& pattern_name)
 {
-  ros::NodeHandle nh;
 
-  pattern_.clear();
-  if (pattern_name.empty()) return true;
+  std::map<std::string, std::vector<TargetPointPatternElement> >::iterator found_pattern;
 
-  XmlRpc::XmlRpcValue description;
-  double pan = 0.0, tilt = 0.0;
-  ros::Duration interval(default_interval_);
-  PatternElement element;
-  element.orientation.header.frame_id = this->robot_link_reference_frame_;
+  found_pattern = patterns_.find(pattern_name);
 
-  if (!nh.getParamCached(patterns_param_, description)) return false;
-  for(int i = 0; i < description.size(); ++i) {
-    if (!description[i].hasMember("name") || description[i]["name"] != pattern_name) continue;
-    if (!description[i].hasMember("pattern")) continue;
-
-    ROS_INFO("[cam joint ctrl] Loaded pattern %s!", pattern_name.c_str());
-
-    if (description[i].hasMember("frame_id")) element.orientation.header.frame_id = std::string(description[i]["frame_id"]);
-    if (description[i].hasMember("interval")) interval = ros::Duration(description[i]["interval"]);
-
-    for(int j = 0; j < description[i]["pattern"].size(); ++j) {
-      XmlRpc::XmlRpcValue& element_description = description[i]["pattern"][j];
-
-      element.interval = interval;
-      if (element_description.hasMember("interval")) element.interval = ros::Duration(element_description["interval"]);
-
-      if (element_description.hasMember("pan"))  pan  = element_description["pan"];
-      if (element_description.hasMember("tilt")) tilt = element_description["tilt"];
-      tf::quaternionTFToMsg(tf::createQuaternionFromRPY(0.0, tilt * M_PI/180.0, pan * M_PI/180.0), element.orientation.quaternion);
-      pattern_.push_back(element);
-    }
-
-    return !pattern_.empty();
-  }
+  if (found_pattern != patterns_.end())
+    return true;
 
   ROS_ERROR("Pattern %s not found in %s!", pattern_name.c_str(), patterns_param_.c_str());
   return false;

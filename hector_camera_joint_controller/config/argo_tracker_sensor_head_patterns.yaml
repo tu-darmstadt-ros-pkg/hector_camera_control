@@ -2,8 +2,8 @@ patterns: [
   {name: look_around,
     waypoints: [
       {frame_id: base_link, target_point: [2.0, 0.0, 0.0], goto_velocity_factor: 0.4, stay_time: 1.0},
-      {frame_id: base_link, target_point: [2.0, 0.0, 0.0], goto_velocity_factor: 0.4, stay_time: 1.0},
-      {frame_id: base_link, target_point: [2.0, 0.0, 0.0], goto_velocity_factor: 0.4, stay_time: 1.0}
+      {frame_id: base_link, target_point: [0.0, 2.0, 0.0], goto_velocity_factor: 0.4, stay_time: 1.0},
+      {frame_id: base_link, target_point: [0.0, -2.0, 0.0], goto_velocity_factor: 0.4, stay_time: 1.0}
     ]
   },
   {name: look_world,
