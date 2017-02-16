@@ -81,7 +81,7 @@ protected:
 
 private:
 
-  bool planAndMoveToPoint(const geometry_msgs::PointStamped& point);
+  bool planAndMoveToPoint(const geometry_msgs::PointStamped& point, double velocity_scaling_factor = 1.0);
   bool ComputeDirectionForPoint(const geometry_msgs::PointStamped& lookat_point, geometry_msgs::QuaternionStamped& orientation);
   void ComputeAndSendJointCommand(const geometry_msgs::QuaternionStamped& command_to_use);
   //void publish_joint_states();

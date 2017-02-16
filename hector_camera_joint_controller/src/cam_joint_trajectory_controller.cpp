@@ -188,7 +188,7 @@ void CamJointTrajControl::Reset()
   latest_orientation_cmd_.reset();
 }
 
-bool CamJointTrajControl::planAndMoveToPoint(const geometry_msgs::PointStamped& point)
+bool CamJointTrajControl::planAndMoveToPoint(const geometry_msgs::PointStamped& point, double velocity_scaling_factor)
 {
   moveit_msgs::GetMotionPlanRequest req;
   moveit_msgs::GetMotionPlanResponse res;
@@ -235,6 +235,7 @@ bool CamJointTrajControl::planAndMoveToPoint(const geometry_msgs::PointStamped& 
   req.motion_plan_request.group_name = "sensor_head_group";
   req.motion_plan_request.goal_constraints.push_back(constraints);
   req.motion_plan_request.allowed_planning_time = 0.2;
+  req.motion_plan_request.max_velocity_scaling_factor = velocity_scaling_factor;
 
   bool plan_retrieval_success = this->get_plan_service_client_.call(req, res);
 
@@ -516,6 +517,7 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
       }
 
       if (look_at_server_->isActive()){
+        ROS_INFO("Attempting to plan lookat failed multiple times, aborting.");
         look_at_server_->setAborted();
         control_mode_ = MODE_OFF;
         this->stopControllerTrajExecution();
@@ -537,6 +539,8 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
 
         const std::vector<TargetPointPatternElement>& curr_pattern = patterns_.at(current_pattern_name_);
         const TargetPointPatternElement& curr_target = curr_pattern[pattern_index_];
+
+        double velocity_scaling_factor = curr_pattern[pattern_index_].goto_velocity_factor;
 
         ros::Rate rate (10);
 
@@ -760,7 +764,7 @@ void CamJointTrajControl::lookAtPreemptCallback()
 void CamJointTrajControl::stopControllerTrajExecution()
 {
   if (gh_list_.size() > 0){
-    ROS_INFO("[cam joint ctrl] Setting controller to cancelled");
+    ROS_INFO("[cam joint ctrl] Setting joint traj controller to cancelled");
     joint_traj_client_->cancelAllGoals();
     //gh_list_.rbegin()->setCanceled();
   }
