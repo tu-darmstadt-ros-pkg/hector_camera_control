@@ -504,7 +504,24 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
 
       new_goal_received_ = false;
 
-      this->planAndMoveToPoint(this->lookat_point_);
+      ros::Rate rate (10);
+
+      for (size_t i = 0; i < 5; ++i)
+      {
+        if (this->planAndMoveToPoint(this->lookat_point_))
+        {
+          return;
+        }
+        rate.sleep();
+      }
+
+      if (look_at_server_->isActive()){
+        look_at_server_->setAborted();
+        control_mode_ = MODE_OFF;
+        this->stopControllerTrajExecution();
+      }
+
+
 
       //this->ComputeDirectionForPoint(this->lookat_point_, command_quat);
       //this->ComputeAndSendJointCommand(command_quat);
@@ -513,21 +530,6 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
 
     }else if (control_mode_ == MODE_PATTERN){
       ros::Time now = ros::Time::now();
-      
-      /*
-      std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> >::iterator it = gh_list_.begin();
-
-
-      while  (it != gh_list_.end()){
-
-        if (it->getCommState() == actionlib::CommState::ACTIVE ){
-          ROS_INFO("Controller active, waiting to return");
-          return;
-        }
-        it++;
-      }
-      */
-      
 
       if ((gh_list_.size() == 0) && (now > pattern_switch_time_)){
         ROS_INFO("Planning to next target point with index %d", (int) pattern_index_);
@@ -536,11 +538,24 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
         const std::vector<TargetPointPatternElement>& curr_pattern = patterns_.at(current_pattern_name_);
         const TargetPointPatternElement& curr_target = curr_pattern[pattern_index_];
 
-        this->planAndMoveToPoint(curr_target.target_point);
+        ros::Rate rate (10);
+
+        for (size_t i = 0; i < 5; ++i)
+        {
+          if (this->planAndMoveToPoint(curr_target.target_point))
+          {
+            return;
+          }
+          rate.sleep();
+        }
+
+        ROS_WARN("Tried reaching wp 5 times and failed, switching to next one");
+
+        pattern_index_ = (pattern_index_ + 1) % curr_pattern.size();
         return;
 
       }else{
-        ROS_INFO("Not yet finished");
+        ROS_DEBUG("Waiting in pattern mode");
         return;
       }
 
