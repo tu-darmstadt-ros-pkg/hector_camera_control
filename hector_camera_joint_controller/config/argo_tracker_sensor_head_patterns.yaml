@@ -13,14 +13,14 @@ patterns: [
   },
   {name: search_umad,
     waypoints: [
-      {frame_id: world, target_point: [0.0, 0.0, 2.5], goto_velocity_factor: 0.4, stay_time: 1.0},
-      {frame_id: world, target_point: [0.0, 5.0, 2.5], goto_velocity_factor: 0.4, stay_time: 1.0},
-      {frame_id: world, target_point: [7.5, 5.0, 2.5], goto_velocity_factor: 0.4, stay_time: 1.0},
-      {frame_id: world, target_point: [7.5, 0.0, 2.5], goto_velocity_factor: 0.4, stay_time: 1.0},
-      {frame_id: world, target_point: [7.5, 0.0, 1.0], goto_velocity_factor: 0.4, stay_time: 1.0},
-      {frame_id: world, target_point: [7.5, 5.0, 1.0], goto_velocity_factor: 0.4, stay_time: 1.0},
-      {frame_id: world, target_point: [0.0, 5.0, 1.0], goto_velocity_factor: 0.4, stay_time: 1.0},
-      {frame_id: world, target_point: [0.0, 0.0, 1.0], goto_velocity_factor: 0.4, stay_time: 1.0}
+      {frame_id: world, target_point: [1.0, 1.5, 2.5], goto_velocity_factor: 0.4, stay_time: 1.0},
+      {frame_id: world, target_point: [1.0, 3.8, 2.5], goto_velocity_factor: 0.4, stay_time: 1.0},
+      {frame_id: world, target_point: [6.0, 3.8, 2.5], goto_velocity_factor: 0.4, stay_time: 1.0},
+      {frame_id: world, target_point: [6.0, 1.5, 2.5], goto_velocity_factor: 0.4, stay_time: 1.0},
+      {frame_id: world, target_point: [6.0, 1.5, 1.0], goto_velocity_factor: 0.4, stay_time: 1.0},
+      {frame_id: world, target_point: [6.0, 3.8, 1.0], goto_velocity_factor: 0.4, stay_time: 1.0},
+      {frame_id: world, target_point: [1.0, 3.8, 1.0], goto_velocity_factor: 0.4, stay_time: 1.0},
+      {frame_id: world, target_point: [1.0, 1.5, 1.0], goto_velocity_factor: 0.4, stay_time: 1.0}
     ]
   },
 ]
