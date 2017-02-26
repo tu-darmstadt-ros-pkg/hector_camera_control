@@ -35,6 +35,8 @@
 
 #include <moveit_msgs/GetMotionPlan.h>
 
+#include <hector_perception_msgs/CameraPatternInfo.h>
+
 namespace cam_control {
 
 enum
@@ -73,6 +75,8 @@ void CamJointTrajControl::Init()
 {
   pnh_ = ros::NodeHandle("~");
   nh_ = ros::NodeHandle("");
+
+  pattern_info_pub_ = pnh_.advertise<hector_perception_msgs::CameraPatternInfo>("/available_camera_patterns",2, true);
 
   pnh_.getParam("controller_namespace", controller_namespace_);
   pnh_.getParam("control_loop_period", control_rate_);
@@ -776,6 +780,8 @@ bool CamJointTrajControl::loadPatterns()
 {
   ros::NodeHandle nh;
 
+  hector_perception_msgs::CameraPatternInfo cam_pattern_info;
+
   patterns_.clear();
 
   XmlRpc::XmlRpcValue description;
@@ -799,6 +805,8 @@ bool CamJointTrajControl::loadPatterns()
 
     std::string name = std::string(description[i]["name"]);
 
+    cam_pattern_info.pattern_names.push_back(name);
+
     std::vector<TargetPointPatternElement>& waypoint_vec = patterns_[name];
 
     for(int j = 0; j < description[i]["waypoints"].size(); ++j) {
@@ -821,6 +829,8 @@ bool CamJointTrajControl::loadPatterns()
     }
 
   }
+
+  pattern_info_pub_.publish(cam_pattern_info);
 
 
 

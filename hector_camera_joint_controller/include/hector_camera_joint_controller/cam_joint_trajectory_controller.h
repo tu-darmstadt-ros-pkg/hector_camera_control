@@ -148,6 +148,9 @@ private:
   ros::Subscriber sub_;
   tf::TransformListener* transform_listener_;
 
+
+  ros::Publisher pattern_info_pub_;
+
   ros::ServiceClient get_plan_service_client_;
 
   void cmdCallback(const geometry_msgs::QuaternionStamped::ConstPtr& cmd_msg);
