@@ -58,6 +58,7 @@ CamJointTrajControl::CamJointTrajControl()
   , control_mode_(MODE_OFF)
   , use_direct_position_commands_(false)
   , new_goal_received_(false)
+  , pattern_index_ (0)
 {
   transform_listener_ = 0;
 
@@ -122,6 +123,8 @@ void CamJointTrajControl::Init()
 
   }else{
     joint_traj_client_.reset(new actionlib::ActionClient<control_msgs::FollowJointTrajectoryAction>(controller_nh_.getNamespace() + "/follow_joint_trajectory"));
+
+    joint_trajectory_action_status_sub_ = controller_nh_.subscribe("follow_joint_trajectory/status", 1, &CamJointTrajControl::trajActionStatusCallback, this);
 
     ros::ServiceClient query_joint_traj_state_client = controller_nh_.serviceClient<control_msgs::QueryTrajectoryState>("query_state");
 
@@ -536,6 +539,7 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
 
     }else if (control_mode_ == MODE_PATTERN){
       ros::Time now = ros::Time::now();
+      ROS_DEBUG("In pattern mode");
 
       if ((gh_list_.size() == 0) && (now > pattern_switch_time_)){
         ROS_INFO("Planning to next target point with index %d", (int) pattern_index_);
@@ -603,6 +607,7 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
     //this->ComputeAndSendCommand();
   }else{
     //Not in Action mode
+    ROS_DEBUG("joint_trajectory_preempted_ true");
 
     if (control_mode_ == MODE_ORIENTATION){
       if (latest_orientation_cmd_.get()){
@@ -615,6 +620,7 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
 
 void CamJointTrajControl::transistionCb(actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> gh)
 {  
+
   std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> >::iterator it = gh_list_.begin();
 
   ROS_DEBUG("----------------Num ghs: %d --------------", (int)gh_list_.size());
@@ -657,6 +663,9 @@ void CamJointTrajControl::transistionCb(actionlib::ClientGoalHandle<control_msgs
         if (look_at_server_->isActive()){
           look_at_server_->setPreempted();
         }
+        control_mode_ = MODE_OFF;
+        it = gh_list_.erase(it);
+        return;
       }
 
       it = gh_list_.erase(it);
@@ -734,6 +743,7 @@ void CamJointTrajControl::lookAtGoalCallback()
 
 
     if (this->findPattern(goal->look_at_target.pattern)){
+      ROS_INFO("Starting pattern %s", goal->look_at_target.pattern.c_str());
 
       // Setup pattern following
       current_pattern_name_ = goal->look_at_target.pattern;
@@ -763,6 +773,33 @@ void CamJointTrajControl::lookAtPreemptCallback()
   joint_trajectory_preempted_ = true;
   this->stopControllerTrajExecution();
   control_mode_ = MODE_OFF;
+}
+
+void CamJointTrajControl::trajActionStatusCallback(const actionlib_msgs::GoalStatusArrayConstPtr& msg)
+{
+  ROS_DEBUG("Action status callback");
+  if (control_mode_ == MODE_PATTERN){
+    for (size_t i = 0; i < msg->status_list.size(); ++i){
+
+      const actionlib_msgs::GoalStatus& curr_status = msg->status_list[i];
+
+      std::size_t found = curr_status.goal_id.id.find(this->pnh_.getNamespace());
+
+      if (found != std::string::npos){
+        continue;
+      }
+
+      // If we reach this, another client has an active goal, thus preempt pattern
+      // which is waiting for sending next goal to controller
+      if (curr_status.status == actionlib_msgs::GoalStatus::ACTIVE){
+        control_mode_ = MODE_OFF;
+        joint_trajectory_preempted_ = true;
+        look_at_server_->setPreempted();
+        ROS_INFO("Other client sent goal %s, preempting pattern", curr_status.goal_id.id.c_str());
+      }
+
+    }
+  }
 }
 
 void CamJointTrajControl::stopControllerTrajExecution()

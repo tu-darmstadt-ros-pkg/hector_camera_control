@@ -95,6 +95,8 @@ private:
   void lookAtGoalCallback();
   void lookAtPreemptCallback();
 
+  void trajActionStatusCallback(const actionlib_msgs::GoalStatusArrayConstPtr& msg);
+
   void stopControllerTrajExecution();
 
   bool loadPatterns();
@@ -162,6 +164,8 @@ private:
   Eigen::Quaterniond rotation_;
 
   boost::shared_ptr<actionlib::ActionClient<control_msgs::FollowJointTrajectoryAction> > joint_traj_client_;
+  ros::Subscriber joint_trajectory_action_status_sub_;
+
   ros::Subscriber joint_traj_state_sub_;
 
   boost::shared_ptr<actionlib::SimpleActionServer<hector_perception_msgs::LookAtAction> > look_at_server_;
