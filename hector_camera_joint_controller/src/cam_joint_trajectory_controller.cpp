@@ -778,6 +778,7 @@ void CamJointTrajControl::lookAtPreemptCallback()
 void CamJointTrajControl::trajActionStatusCallback(const actionlib_msgs::GoalStatusArrayConstPtr& msg)
 {
   ROS_DEBUG("Action status callback");
+  
   if (control_mode_ == MODE_PATTERN){
     for (size_t i = 0; i < msg->status_list.size(); ++i){
 
@@ -796,6 +797,8 @@ void CamJointTrajControl::trajActionStatusCallback(const actionlib_msgs::GoalSta
         joint_trajectory_preempted_ = true;
         look_at_server_->setPreempted();
         ROS_INFO("Other client sent goal %s, preempting pattern", curr_status.goal_id.id.c_str());
+      }else{
+        ROS_DEBUG("Other goal with status %d", (int)curr_status.status);
       }
 
     }
