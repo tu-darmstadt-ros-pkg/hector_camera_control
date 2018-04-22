@@ -3,7 +3,7 @@
 <launch>
   
   <group ns="pan_tilt_sensor_head_joint_control">
-     <rosparam file="$(find hector_camera_joint_controller)/config/hector_tracker_sensor_head_patterns.yaml" command="load" />
+     <rosparam file="$(find hector_camera_joint_controller)/config/argo_tracker_sensor_head_patterns.yaml" command="load" />
   </group>  
   
   <node name="pan_tilt_sensor_head_joint_control" pkg="hector_camera_joint_controller" type="cam_joint_trajectory_controller" respawn="true" output="screen">
