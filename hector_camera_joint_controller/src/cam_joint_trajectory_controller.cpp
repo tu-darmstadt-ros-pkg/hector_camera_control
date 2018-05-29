@@ -518,7 +518,8 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
       {
         if (this->planAndMoveToPoint(this->lookat_point_))
         {
-          control_mode_ = MODE_OFF;
+          if (lookat_oneshot_)
+            control_mode_ = MODE_OFF;
           return;
         }
         rate.sleep();
