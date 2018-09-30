@@ -135,6 +135,8 @@ void CamJointTrajControl::Init()
     do{
       if (query_joint_traj_state_client.waitForExistence(ros::Duration(2.0))){
         control_msgs::QueryTrajectoryState srv;
+        
+        ros::Duration(1.0).sleep();
 
         // Hack to make this work in sim (otherwise time might be 0)
         //sleep(1);
