@@ -201,6 +201,7 @@ private:
   ros::Time pattern_switch_time_;
 
   bool use_direct_position_commands_;
+  bool use_planning_based_pointing_;
 
 
 };
