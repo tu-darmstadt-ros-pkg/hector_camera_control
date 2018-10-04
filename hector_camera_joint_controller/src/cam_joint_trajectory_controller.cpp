@@ -59,6 +59,7 @@ CamJointTrajControl::CamJointTrajControl()
   , use_direct_position_commands_(false)
   , new_goal_received_(false)
   , pattern_index_ (0)
+  , use_planning_based_pointing_(true)
 {
   transform_listener_ = 0;
 
@@ -101,6 +102,7 @@ void CamJointTrajControl::Init()
 
 
   pnh_.getParam("use_direct_position_commands", use_direct_position_commands_);
+  pnh_.getParam("use_planning_based_pointing", use_planning_based_pointing_);
 
   if (type_string == "xyz"){
     rotationConv = xyz;
@@ -513,31 +515,34 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
       }
 
       new_goal_received_ = false;
+      
+      
+      if (use_planning_based_pointing_){
 
-      ros::Rate rate (10);
+        ros::Rate rate (10);
 
-      for (size_t i = 0; i < 5; ++i)
-      {
-        if (this->planAndMoveToPoint(this->lookat_point_))
+        for (size_t i = 0; i < 5; ++i)
         {
-          if (lookat_oneshot_)
-            control_mode_ = MODE_OFF;
-          return;
+          if (this->planAndMoveToPoint(this->lookat_point_))
+          {
+            if (lookat_oneshot_)
+              control_mode_ = MODE_OFF;
+            return;
+          }
+          rate.sleep();
         }
-        rate.sleep();
+
+        if (look_at_server_->isActive()){
+          ROS_INFO("Attempting to plan lookat failed multiple times, aborting.");
+          look_at_server_->setAborted();
+          control_mode_ = MODE_OFF;
+          this->stopControllerTrajExecution();
+        }
+      }else{
+        geometry_msgs::QuaternionStamped command_quat;
+        this->ComputeDirectionForPoint(this->lookat_point_, command_quat);
+        this->ComputeAndSendJointCommand(command_quat);
       }
-
-      if (look_at_server_->isActive()){
-        ROS_INFO("Attempting to plan lookat failed multiple times, aborting.");
-        look_at_server_->setAborted();
-        control_mode_ = MODE_OFF;
-        this->stopControllerTrajExecution();
-      }
-
-
-
-      //this->ComputeDirectionForPoint(this->lookat_point_, command_quat);
-      //this->ComputeAndSendJointCommand(command_quat);
 
 
 
@@ -554,18 +559,24 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
 
         double velocity_scaling_factor = curr_pattern[pattern_index_].goto_velocity_factor;
 
-        ros::Rate rate (10);
+        if (use_planning_based_pointing_){
+          ros::Rate rate (10);
 
-        for (size_t i = 0; i < 5; ++i)
-        {
-          if (this->planAndMoveToPoint(curr_target.target_point))
+          for (size_t i = 0; i < 5; ++i)
           {
-            return;
+            if (this->planAndMoveToPoint(curr_target.target_point))
+            {
+              return;
+            }
+            rate.sleep();
           }
-          rate.sleep();
-        }
 
-        ROS_WARN("Tried reaching wp 5 times and failed, switching to next one");
+          ROS_WARN("Tried reaching wp 5 times and failed, switching to next one");
+        }else{
+          geometry_msgs::QuaternionStamped command_quat;
+          this->ComputeDirectionForPoint(curr_target.target_point, command_quat);
+          this->ComputeAndSendJointCommand(command_quat);
+        }
 
         pattern_index_ = (pattern_index_ + 1) % curr_pattern.size();
         return;
