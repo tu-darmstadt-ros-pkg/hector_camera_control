@@ -572,13 +572,14 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
           }
 
           ROS_WARN("Tried reaching wp 5 times and failed, switching to next one");
+          pattern_index_ = (pattern_index_ + 1) % curr_pattern.size();
         }else{
           geometry_msgs::QuaternionStamped command_quat;
           this->ComputeDirectionForPoint(curr_target.target_point, command_quat);
           this->ComputeAndSendJointCommand(command_quat);
         }
 
-        pattern_index_ = (pattern_index_ + 1) % curr_pattern.size();
+        
         return;
 
       }else{
