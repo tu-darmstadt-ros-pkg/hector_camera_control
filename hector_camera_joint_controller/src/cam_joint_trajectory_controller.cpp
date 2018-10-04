@@ -542,6 +542,7 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
         geometry_msgs::QuaternionStamped command_quat;
         this->ComputeDirectionForPoint(this->lookat_point_, command_quat);
         this->ComputeAndSendJointCommand(command_quat);
+        return;
       }
 
 
