@@ -60,6 +60,7 @@ CamJointTrajControl::CamJointTrajControl()
   , new_goal_received_(false)
   , pattern_index_ (0)
   , use_planning_based_pointing_(true)
+  , disable_orientation_camera_command_input_(false)
 {
   transform_listener_ = 0;
 
@@ -175,7 +176,13 @@ void CamJointTrajControl::Init()
 
   //controlPeriod = ros::Duration(controlRate > 0.0 ? 1.0/controlRate : 0.0);
 
-  sub_ = nh_.subscribe("/camera/command", 1, &CamJointTrajControl::cmdCallback, this);
+  
+  
+  pnh_.getParam("disable_orientation_camera_command_input", disable_orientation_camera_command_input_);
+  
+  if (!disable_orientation_camera_command_input_){
+    sub_ = nh_.subscribe("/camera/command", 1, &CamJointTrajControl::cmdCallback, this);    
+  }
 
   this->Reset();
 

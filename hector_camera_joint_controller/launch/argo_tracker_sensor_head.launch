@@ -16,6 +16,7 @@
 
     <param name="default_direction_reference_frame" value="base_link" />
     <param name="stabilize_default_direction_reference" value="false" />
+    <param name="disable_orientation_camera_command_input" value="true" />
 
     <param name="joint_order_type" value="zyx" />
   </node>
