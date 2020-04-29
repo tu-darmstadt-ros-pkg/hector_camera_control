@@ -12,7 +12,7 @@ find_package(catkin REQUIRED COMPONENTS
   hector_perception_msgs
 )
 
-find_package(Eigen REQUIRED)
+find_package(Eigen3 REQUIRED)
 include_directories(${EIGEN_INCLUDE_DIRS} include)
 add_definitions(${EIGEN_DEFINITIONS})
 

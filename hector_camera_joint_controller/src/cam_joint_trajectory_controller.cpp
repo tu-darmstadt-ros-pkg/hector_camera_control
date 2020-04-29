@@ -82,7 +82,7 @@ void CamJointTrajControl::Init()
   pattern_info_pub_ = pnh_.advertise<hector_perception_msgs::CameraPatternInfo>("/available_camera_patterns",2, true);
 
   pnh_.getParam("controller_namespace", controller_namespace_);
-  pnh_.getParam("control_loop_period", control_rate_);
+  pnh_.getParam("control_loop_period", control_loop_period_);
   pnh_.getParam("default_direction_reference_frame", default_look_dir_frame_);
   pnh_.getParam("stabilize_default_direction_reference", stabilize_default_look_dir_frame_);
   pnh_.getParam("robot_link_reference_frame", robot_link_reference_frame_);
@@ -166,16 +166,7 @@ void CamJointTrajControl::Init()
     }while (!retrieved_names);
   }
 
-  // Do not retrieve joint trajectory controller state for the moment
-  //joint_traj_state_sub_ = controller_nh_.subscribe("state", 1, &CamJointTrajControl::jointTrajStateCb, this);
-
-  control_timer = nh_.createTimer(ros::Duration(control_rate_), &CamJointTrajControl::controlTimerCallback, this, false, true);
-
-
-  //double controlRate = 20.0;
-
-  //controlPeriod = ros::Duration(controlRate > 0.0 ? 1.0/controlRate : 0.0);
-
+  control_timer = nh_.createTimer(ros::Duration(control_loop_period_), &CamJointTrajControl::controlTimerCallback, this, false, true);
   
   
   pnh_.getParam("disable_orientation_camera_command_input", disable_orientation_camera_command_input_);
@@ -190,12 +181,9 @@ void CamJointTrajControl::Init()
   ros::Duration(1.0).sleep();
 
 
-  look_at_server_.reset(new actionlib::SimpleActionServer<hector_perception_msgs::LookAtAction>(pnh_, "look_at", 0, false));
-
-  //look_at_server_->registerGoalCallback(boost::bind(&CamJointTrajControl::lookAtGoalCallback, this, _1));
+  look_at_server_ = std::make_shared<actionlib::SimpleActionServer<hector_perception_msgs::LookAtAction>>(pnh_, "look_at", false);
   look_at_server_->registerGoalCallback(boost::bind(&CamJointTrajControl::lookAtGoalCallback, this));
   look_at_server_->registerPreemptCallback(boost::bind(&CamJointTrajControl::lookAtPreemptCallback, this));
-
   look_at_server_->start();
 }
 
@@ -221,7 +209,7 @@ bool CamJointTrajControl::planAndMoveToPoint(const geometry_msgs::PointStamped& 
   visibility.target_radius = 0.05;
 
   visibility.target_pose.header.frame_id = point.header.frame_id;
-  visibility.sensor_pose.header.frame_id = "arm_zoom_cam_link";
+  visibility.sensor_pose.header.frame_id = lookat_frame_;
 
   visibility.sensor_pose.pose.position.x = 0.1;
   visibility.sensor_pose.pose.orientation.w = 1.0;
@@ -229,14 +217,9 @@ bool CamJointTrajControl::planAndMoveToPoint(const geometry_msgs::PointStamped& 
 
   visibility.target_pose.pose.position = point.point;
   visibility.target_pose.pose.orientation.w = 1.0;
-  //nh_combined_planner_.param<std::string>("camera_frame", cam_frame_, "arm_zoom_cam_link");
-  //constraints_.visibility_constraints.begin()->sensor_pose.header.frame_id = cam_frame_;
-  //marker_.header.frame_id = scene_->getPlanningFrame();
-
-  //req.motion_plan_request.trajectory_constraints.constraints
 
   moveit_msgs::Constraints constraints;
-  constraints.name = "visbility";
+  constraints.name = "visibility";
   constraints.visibility_constraints.push_back(visibility);
 
   moveit_msgs::JointConstraint joint_constraint;
@@ -263,7 +246,7 @@ bool CamJointTrajControl::planAndMoveToPoint(const geometry_msgs::PointStamped& 
   }
 
   if (!(res.motion_plan_response.error_code.val == moveit_msgs::MoveItErrorCodes::SUCCESS) ){
-    ROS_WARN("[cam joint ctrl] Plan result error code is %d, aborting.", (int)res.motion_plan_response.error_code.val);
+    ROS_WARN("[cam joint ctrl] Plan result error code is %d, aborting.", static_cast<int>(res.motion_plan_response.error_code.val));
     return false;
   }
 
@@ -274,14 +257,13 @@ bool CamJointTrajControl::planAndMoveToPoint(const geometry_msgs::PointStamped& 
 
   goal.goal_time_tolerance = ros::Duration(1.0);
 
-  //goal.trajectory.joint_names = this->latest_queried_joint_traj_state_.name;
   goal.trajectory = res.motion_plan_response.trajectory.joint_trajectory;
   //goal.trajectory.header.stamp = ros::Time::now() + ros::Duration(0.025);
   goal.trajectory.header.stamp = ros::Time::now();
 
   last_plan_time_ = ros::Time::now();
 
-  gh_list_.push_back(joint_traj_client_->sendGoal(goal, boost::bind(&CamJointTrajControl::transistionCb, this, _1)));
+  gh_list_.push_back(joint_traj_client_->sendGoal(goal, boost::bind(&CamJointTrajControl::transitionCb, this, _1)));
 
   return true;
 }
@@ -466,7 +448,7 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
     //latest_gh_ = joint_traj_client_->sendGoal(goal);
     //boost::bind(&CamJointTrajControl::doneCb, this, _1, _2));
 
-    gh_list_.push_back(joint_traj_client_->sendGoal(goal, boost::bind(&CamJointTrajControl::transistionCb, this, _1)));
+    gh_list_.push_back(joint_traj_client_->sendGoal(goal, boost::bind(&CamJointTrajControl::transitionCb, this, _1)));
   }else{
     servo_pub_1_.publish(desAngle[0]);
     servo_pub_2_.publish(desAngle[1]);
@@ -483,11 +465,6 @@ void CamJointTrajControl::cmdCallback(const geometry_msgs::QuaternionStamped::Co
 
   latest_orientation_cmd_ = cmd_msg;
   control_mode_ = MODE_ORIENTATION;
-}
-
-void CamJointTrajControl::jointTrajStateCb(const control_msgs::JointControllerState::ConstPtr& msg)
-{
-  this->latest_joint_traj_state_ = msg;
 }
 
 void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
@@ -625,10 +602,6 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
     }else{
       ROS_WARN("In unknown control mode %d, not commanding joints.", (int)control_mode_);
     }
-
-
-
-    //this->ComputeAndSendCommand();
   }else{
     //Not in Action mode
     ROS_DEBUG("joint_trajectory_preempted_ true");
@@ -642,7 +615,7 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
   }
 }
 
-void CamJointTrajControl::transistionCb(actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> gh)
+void CamJointTrajControl::transitionCb(actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> gh)
 {  
 
   std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> >::iterator it = gh_list_.begin();
@@ -766,7 +739,7 @@ void CamJointTrajControl::lookAtGoalCallback()
   if (!goal->look_at_target.pattern.empty()){
 
 
-    if (this->findPattern(goal->look_at_target.pattern)){
+    if (findPattern(goal->look_at_target.pattern)){
       ROS_INFO("Starting pattern %s", goal->look_at_target.pattern.c_str());
 
       // Setup pattern following
@@ -882,9 +855,9 @@ bool CamJointTrajControl::loadPatterns()
       element.stay_time = ros::Duration(element_description["stay_time"]);
       element.goto_velocity_factor = element_description["goto_velocity_factor"];
 
-      element.target_point.point.x = (double) element_description["target_point"][0];
-      element.target_point.point.y = (double) element_description["target_point"][1];
-      element.target_point.point.z = (double) element_description["target_point"][2];
+      element.target_point.point.x = static_cast<double>(element_description["target_point"][0]);
+      element.target_point.point.y = static_cast<double>(element_description["target_point"][1]);
+      element.target_point.point.z = static_cast<double>(element_description["target_point"][2]);
 
       waypoint_vec.push_back(element);
     }
@@ -896,8 +869,6 @@ bool CamJointTrajControl::loadPatterns()
 
   pattern_info_pub_.publish(cam_pattern_info);
 
-
-
  return true;
 }
 
@@ -905,9 +876,7 @@ bool CamJointTrajControl::loadPatterns()
 bool CamJointTrajControl::findPattern(const std::string& pattern_name)
 {
 
-  std::map<std::string, std::vector<TargetPointPatternElement> >::iterator found_pattern;
-
-  found_pattern = patterns_.find(pattern_name);
+  std::map<std::string, std::vector<TargetPointPatternElement> >::iterator found_pattern = patterns_.find(pattern_name);
 
   if (found_pattern != patterns_.end())
     return true;
