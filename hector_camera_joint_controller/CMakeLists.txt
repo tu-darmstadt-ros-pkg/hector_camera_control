@@ -10,6 +10,9 @@ find_package(catkin REQUIRED COMPONENTS
   actionlib
   moveit_msgs
   hector_perception_msgs
+  moveit_core
+  moveit_ros_planning
+  moveit_ros_planning_interface
 )
 
 find_package(Eigen3 REQUIRED)

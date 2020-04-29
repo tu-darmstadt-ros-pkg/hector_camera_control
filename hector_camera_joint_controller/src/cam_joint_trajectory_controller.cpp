@@ -81,6 +81,8 @@ void CamJointTrajControl::Init()
 
   pattern_info_pub_ = pnh_.advertise<hector_perception_msgs::CameraPatternInfo>("/available_camera_patterns",2, true);
 
+  pnh_.param<std::string>("move_group", move_group_name_, "sensor_head_group");
+
   pnh_.getParam("controller_namespace", controller_namespace_);
   pnh_.getParam("control_loop_period", control_loop_period_);
   pnh_.getParam("default_direction_reference_frame", default_look_dir_frame_);
@@ -125,45 +127,19 @@ void CamJointTrajControl::Init()
     servo_pub_2_ = nh_.advertise<std_msgs::Float64>("servo2_command", 1);
 
   }else{
-    joint_traj_client_.reset(new actionlib::ActionClient<control_msgs::FollowJointTrajectoryAction>(controller_nh_.getNamespace() + "/follow_joint_trajectory"));
+    move_group_ = std::make_shared<moveit::planning_interface::MoveGroupInterface>(move_group_name_);
+    joint_names_ = move_group_->getJointNames();
+    if (joint_names_.size() != 2) {
+      ROS_FATAL_STREAM("Found more than two joints in move group '" << move_group_name_ << "'.");
+      exit(0);
+    }
+    for (unsigned int i = 0; i < joint_names_.size(); ++i){
+      ROS_INFO("[cam joint ctrl] Joint %d : %s", static_cast<int>(i), joint_names_[i].c_str());
+    }
 
+    joint_traj_client_.reset(new actionlib::ActionClient<control_msgs::FollowJointTrajectoryAction>(controller_nh_.getNamespace() + "/follow_joint_trajectory"));
     joint_trajectory_action_status_sub_ = controller_nh_.subscribe("follow_joint_trajectory/status", 1, &CamJointTrajControl::trajActionStatusCallback, this);
 
-    ros::ServiceClient query_joint_traj_state_client = controller_nh_.serviceClient<control_msgs::QueryTrajectoryState>("query_state");
-
-    bool retrieved_names = false;
-
-    ROS_INFO ("Trying to retrieve state for controller namespace: %s", controller_nh_.getNamespace().c_str());
-
-    do{
-      if (query_joint_traj_state_client.waitForExistence(ros::Duration(2.0))){
-        control_msgs::QueryTrajectoryState srv;
-        
-        ros::Duration(1.0).sleep();
-
-        // Hack to make this work in sim (otherwise time might be 0)
-        //sleep(1);
-        transform_listener_->waitForTransform("odom", default_look_dir_frame_, ros::Time(0), ros::Duration(2.0));
-
-
-        srv.request.time = ros::Time::now();
-
-        //ROS_ERROR("Time: %d, %d", srv.request.time.sec, srv.request.time.nsec);
-        if (query_joint_traj_state_client.call(srv)){
-          latest_queried_joint_traj_state_ = srv.response;
-          retrieved_names = true;
-
-          ROS_INFO("[cam joint ctrl] Retrieved joint names: ");
-          for (size_t i = 0; i < latest_queried_joint_traj_state_.name.size(); ++i){
-            ROS_INFO("[cam joint ctrl] Joint %d : %s", static_cast<int>(i), latest_queried_joint_traj_state_.name[i].c_str());
-          }
-
-        }
-      }else{
-        ROS_ERROR("Could not retrieve controller state (and joint names), continuing to try.");
-      }
-
-    }while (!retrieved_names);
   }
 
   control_timer = nh_.createTimer(ros::Duration(control_loop_period_), &CamJointTrajControl::controlTimerCallback, this, false, true);
@@ -223,17 +199,17 @@ bool CamJointTrajControl::planAndMoveToPoint(const geometry_msgs::PointStamped& 
   constraints.visibility_constraints.push_back(visibility);
 
   moveit_msgs::JointConstraint joint_constraint;
-  joint_constraint.joint_name = latest_queried_joint_traj_state_.name[0];
+  joint_constraint.joint_name = joint_names_[0];
   joint_constraint.position = 0.0;
   joint_constraint.tolerance_above = M_PI;
   joint_constraint.tolerance_below = M_PI;
   joint_constraint.weight = 0.5;
   constraints.joint_constraints.push_back(joint_constraint);
 
-  joint_constraint.joint_name = latest_queried_joint_traj_state_.name[1];
+  joint_constraint.joint_name = joint_names_[1];
   constraints.joint_constraints.push_back(joint_constraint);
 
-  req.motion_plan_request.group_name = "sensor_head_group";
+  req.motion_plan_request.group_name = move_group_name_;
   req.motion_plan_request.goal_constraints.push_back(constraints);
   req.motion_plan_request.allowed_planning_time = 0.2;
   req.motion_plan_request.max_velocity_scaling_factor = velocity_scaling_factor;
@@ -425,7 +401,7 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
     //goal.goal.path_tolerance = 1.0;
     //goal.goal.trajectory.joint_names
 
-    goal.trajectory.joint_names = this->latest_queried_joint_traj_state_.name;
+    goal.trajectory.joint_names = joint_names_;
     goal.trajectory.points.resize(1);
 
     goal.trajectory.points[0].positions.resize(2);

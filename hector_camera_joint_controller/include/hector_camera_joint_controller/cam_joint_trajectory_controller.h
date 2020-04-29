@@ -49,10 +49,10 @@
 
 #include <control_msgs/FollowJointTrajectoryAction.h>
 #include <control_msgs/JointControllerState.h>
-#include <control_msgs/QueryTrajectoryState.h>
 
 #include <hector_perception_msgs/LookAtAction.h>
 
+#include <moveit/move_group_interface/move_group_interface.h>
 
 namespace cam_control
 {
@@ -97,8 +97,6 @@ private:
 
   void cmdCallback(const geometry_msgs::QuaternionStamped::ConstPtr& cmd_msg);
 
-  unsigned int countOfServos;
-  unsigned int orderOfAxes[3];
   unsigned int rotationConv;
 
   std::string controller_namespace_;
@@ -128,13 +126,15 @@ private:
   ros::Subscriber sub_;
   tf::TransformListener* transform_listener_;
 
-
   ros::Publisher pattern_info_pub_;
 
   ros::ServiceClient get_plan_service_client_;
 
+  std::string move_group_name_;
+  moveit::planning_interface::MoveGroupInterfacePtr move_group_;
+  std::vector<std::string> joint_names_;
+
   geometry_msgs::QuaternionStamped::ConstPtr latest_orientation_cmd_;
-  control_msgs::QueryTrajectoryState::Response latest_queried_joint_traj_state_;
   Eigen::Quaterniond rotation_;
 
   boost::shared_ptr<actionlib::ActionClient<control_msgs::FollowJointTrajectoryAction> > joint_traj_client_;
