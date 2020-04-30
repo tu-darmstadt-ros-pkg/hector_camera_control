@@ -127,8 +127,20 @@ void CamJointTrajControl::Init()
     servo_pub_2_ = nh_.advertise<std_msgs::Float64>("servo2_command", 1);
 
   }else{
-    move_group_ = std::make_shared<moveit::planning_interface::MoveGroupInterface>(move_group_name_);
-    joint_names_ = move_group_->getJointNames();
+    // Load moveit robot model to retrieve joint names
+    robot_model_loader::RobotModelLoader robot_model_loader("robot_description", false);
+    moveit_robot_model_ = robot_model_loader.getModel();
+    if (!moveit_robot_model_){
+      ROS_FATAL_STREAM("Couldn't load robot model!");
+      exit(0);
+    }
+    moveit_robot_state_ = std::make_shared<robot_state::RobotState>(moveit_robot_model_);
+    const robot_state::JointModelGroup* group = moveit_robot_state_->getJointModelGroup(move_group_name_);
+    if (!group) {
+      ROS_FATAL_STREAM("Could not find move group with name '" << move_group_name_ << "'");
+      exit(0);
+    }
+    joint_names_ = group->getJointModelNames();
     if (joint_names_.size() != 2) {
       ROS_FATAL_STREAM("Found more than two joints in move group '" << move_group_name_ << "'.");
       exit(0);
@@ -137,6 +149,7 @@ void CamJointTrajControl::Init()
       ROS_INFO("[cam joint ctrl] Joint %d : %s", static_cast<int>(i), joint_names_[i].c_str());
     }
 
+    // Actions, subscribers
     joint_traj_client_.reset(new actionlib::ActionClient<control_msgs::FollowJointTrajectoryAction>(controller_nh_.getNamespace() + "/follow_joint_trajectory"));
     joint_trajectory_action_status_sub_ = controller_nh_.subscribe("follow_joint_trajectory/status", 1, &CamJointTrajControl::trajActionStatusCallback, this);
 

@@ -52,7 +52,8 @@
 
 #include <hector_perception_msgs/LookAtAction.h>
 
-#include <moveit/move_group_interface/move_group_interface.h>
+#include <moveit/robot_model_loader/robot_model_loader.h>
+#include <moveit/robot_state/robot_state.h>
 
 namespace cam_control
 {
@@ -131,7 +132,8 @@ private:
   ros::ServiceClient get_plan_service_client_;
 
   std::string move_group_name_;
-  moveit::planning_interface::MoveGroupInterfacePtr move_group_;
+  robot_model::RobotModelPtr moveit_robot_model_;
+  robot_state::RobotStatePtr moveit_robot_state_;
   std::vector<std::string> joint_names_;
 
   geometry_msgs::QuaternionStamped::ConstPtr latest_orientation_cmd_;
