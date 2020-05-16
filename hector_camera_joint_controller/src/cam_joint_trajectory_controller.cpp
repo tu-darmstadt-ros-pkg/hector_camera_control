@@ -36,6 +36,7 @@
 #include <moveit_msgs/GetMotionPlan.h>
 
 #include <hector_perception_msgs/CameraPatternInfo.h>
+#include <control_msgs/QueryTrajectoryState.h>
 
 namespace cam_control {
 
@@ -127,36 +128,18 @@ void CamJointTrajControl::Init()
     servo_pub_2_ = nh_.advertise<std_msgs::Float64>("servo2_command", 1);
 
   }else{
-    // Load moveit robot model to retrieve joint names
-    robot_model_loader::RobotModelLoader robot_model_loader("robot_description", false);
-    moveit_robot_model_ = robot_model_loader.getModel();
-    if (!moveit_robot_model_){
-      ROS_FATAL_STREAM("Could not load robot model. Exiting.");
-      exit(0);
-    }
-    moveit_robot_state_ = std::make_shared<robot_state::RobotState>(moveit_robot_model_);
-    const robot_state::JointModelGroup* group = moveit_robot_state_->getJointModelGroup(move_group_name_);
-    if (!group) {
-      ROS_FATAL_STREAM("Could not find move group with name '" << move_group_name_ << "'. Exiting.");
-      exit(0);
-    }
-    joint_names_ = group->getJointModelNames();
-    if (joint_names_.size() != 2) {
-      ROS_FATAL_STREAM("The move group '" << move_group_name_ << "' does not contain the correct amount of joints. Expected: 2; Found: " << joint_names_.size() << ". Exiting.");
-      exit(0);
-    }
-    for (unsigned int i = 0; i < joint_names_.size(); ++i){
-      ROS_INFO("[cam joint ctrl] Joint %d : %s", static_cast<int>(i), joint_names_[i].c_str());
-    }
-
     // Actions, subscribers
     joint_traj_client_.reset(new actionlib::ActionClient<control_msgs::FollowJointTrajectoryAction>(controller_nh_.getNamespace() + "/follow_joint_trajectory"));
     joint_trajectory_action_status_sub_ = controller_nh_.subscribe("follow_joint_trajectory/status", 1, &CamJointTrajControl::trajActionStatusCallback, this);
 
+    if (move_group_name_.empty()){
+      getJointNamesFromController(controller_nh_);
+    }else{
+      getJointNamesFromMoveGroup();
+    }
   }
 
   control_timer = nh_.createTimer(ros::Duration(control_loop_period_), &CamJointTrajControl::controlTimerCallback, this, false, true);
-  
   
   pnh_.getParam("disable_orientation_camera_command_input", disable_orientation_camera_command_input_);
   
@@ -174,6 +157,71 @@ void CamJointTrajControl::Init()
   look_at_server_->registerGoalCallback(boost::bind(&CamJointTrajControl::lookAtGoalCallback, this));
   look_at_server_->registerPreemptCallback(boost::bind(&CamJointTrajControl::lookAtPreemptCallback, this));
   look_at_server_->start();
+}
+
+void CamJointTrajControl::getJointNamesFromMoveGroup()
+{
+  // Load moveit robot model to retrieve joint names
+  robot_model_loader::RobotModelLoader robot_model_loader("robot_description", false);
+  moveit_robot_model_ = robot_model_loader.getModel();
+  if (!moveit_robot_model_){
+    ROS_FATAL_STREAM("Could not load robot model. Exiting.");
+    exit(0);
+  }
+  moveit_robot_state_ = std::make_shared<robot_state::RobotState>(moveit_robot_model_);
+  const robot_state::JointModelGroup* group = moveit_robot_state_->getJointModelGroup(move_group_name_);
+  if (!group) {
+    ROS_FATAL_STREAM("Could not find move group with name '" << move_group_name_ << "'. Exiting.");
+    exit(0);
+  }
+  joint_names_ = group->getJointModelNames();
+  if (joint_names_.size() != 2) {
+    ROS_FATAL_STREAM("The move group '" << move_group_name_ << "' does not contain the correct amount of joints. Expected: 2; Found: " << joint_names_.size() << ". Exiting.");
+    exit(0);
+  }
+  for (unsigned int i = 0; i < joint_names_.size(); ++i){
+    ROS_INFO("[cam joint ctrl] Joint %d : %s", static_cast<int>(i), joint_names_[i].c_str());
+  }
+}
+
+void CamJointTrajControl::getJointNamesFromController(ros::NodeHandle& nh)
+{
+  ros::ServiceClient query_joint_traj_state_client = nh.serviceClient<control_msgs::QueryTrajectoryState>("query_state");
+
+  ROS_INFO ("Trying to retrieve state for controller namespace: %s", controller_nh_.getNamespace().c_str());
+
+  bool retrieved_names = false;
+  control_msgs::QueryTrajectoryState::Response queried_joint_traj_state;
+
+  do{
+    if (query_joint_traj_state_client.waitForExistence(ros::Duration(2.0))){
+      control_msgs::QueryTrajectoryState srv;
+
+      ros::Duration(1.0).sleep();
+
+      // Hack to make this work in sim (otherwise time might be 0)
+      //sleep(1);
+      transform_listener_->waitForTransform("odom", default_look_dir_frame_, ros::Time(0), ros::Duration(2.0));
+
+      srv.request.time = ros::Time::now();
+
+      if (query_joint_traj_state_client.call(srv)){
+        queried_joint_traj_state = srv.response;
+        retrieved_names = true;
+
+
+        ROS_INFO("[cam joint ctrl] Retrieved joint names: ");
+        for (size_t i = 0; i < queried_joint_traj_state.name.size(); ++i){
+          ROS_INFO("[cam joint ctrl] Joint %d : %s", static_cast<int>(i), queried_joint_traj_state.name[i].c_str());
+        }
+        joint_names_ = queried_joint_traj_state.name;
+
+      }
+    }else{
+      ROS_ERROR("Could not retrieve controller state (and joint names), continuing to try.");
+    }
+
+  }while (!retrieved_names);
 }
 
 // Reset
@@ -279,7 +327,6 @@ bool CamJointTrajControl::ComputeDirectionForPoint(const geometry_msgs::PointSta
     return false;
   }
 
-  //geometry_msgs::QuaternionStamped orientation;
   orientation.header = lookat_camera.header;
   orientation.header.frame_id = robot_link_reference_frame_;
   tf::Vector3 dir(lookat_camera.point.x - base_camera_transform.getOrigin().x(), lookat_camera.point.y - base_camera_transform.getOrigin().y(), lookat_camera.point.z - base_camera_transform.getOrigin().z());
@@ -309,12 +356,7 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
 
   Eigen::Quaterniond quat(transform.getRotation().getW(), transform.getRotation().getX(),transform.getRotation().getY(),transform.getRotation().getZ());
 
-
-
-
-
   //stab_transform.getBasis().setRPY(roll, pitch, 0.0);
-
   //std::cout << "\nquat rot\n" << rotation_.matrix() << "\nquat:\n" << quat.matrix() << "\n";
 
   rotation_ = quat * rotation_;
@@ -399,13 +441,9 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
   }
 
   //Eigen::Vector3d angles = rotation_.matrix().eulerAngles(2, 0, 2);
-
   //std::cout << "\nangles:\n" << angles << "\n";
-
   //std::cout << "\nangles:\n" << desAngle << "\n" << "roll_diff: " << roll << " pitch_diff: " <<  pitch << " yaw diff:" << yaw << "\n";
-
   //std::cout << "\nangles:"  << " pitch_diff: " <<  error_pitch << " yaw diff:" << error_yaw << "\n";
-
 
   if (!use_direct_position_commands_){
     control_msgs::FollowJointTrajectoryGoal goal;
@@ -659,7 +697,6 @@ void CamJointTrajControl::transitionCb(actionlib::ClientGoalHandle<control_msgs:
       ++it;
     }    
   }
-
 
   // If we're done and have not requested continuous replanning, set succeeded.
   if ((gh_list_.size() == 0) && lookat_oneshot_ && !new_goal_received_ && !(control_mode_ == MODE_PATTERN)){

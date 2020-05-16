@@ -79,6 +79,9 @@ protected:
   void controlTimerCallback(const ros::TimerEvent& event);
 
 private:
+  void getJointNamesFromMoveGroup();
+  void getJointNamesFromController(ros::NodeHandle& nh);
+
   bool planAndMoveToPoint(const geometry_msgs::PointStamped& point, double velocity_scaling_factor = 1.0);
   bool ComputeDirectionForPoint(const geometry_msgs::PointStamped& lookat_point, geometry_msgs::QuaternionStamped& orientation);
   void ComputeAndSendJointCommand(const geometry_msgs::QuaternionStamped& command_to_use);
