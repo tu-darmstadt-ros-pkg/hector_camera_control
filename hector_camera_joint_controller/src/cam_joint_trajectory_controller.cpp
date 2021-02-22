@@ -260,15 +260,15 @@ bool CamJointTrajControl::planAndMoveToPoint(const geometry_msgs::PointStamped& 
   constraints.visibility_constraints.push_back(visibility);
 
   moveit_msgs::JointConstraint joint_constraint;
-  joint_constraint.joint_name = joint_names_[0];
   joint_constraint.position = 0.0;
   joint_constraint.tolerance_above = M_PI;
   joint_constraint.tolerance_below = M_PI;
   joint_constraint.weight = 0.5;
-  constraints.joint_constraints.push_back(joint_constraint);
 
-  joint_constraint.joint_name = joint_names_[1];
-  constraints.joint_constraints.push_back(joint_constraint);
+  for (size_t i = 0; i < joint_names_.size(); ++i){
+    joint_constraint.joint_name = joint_names_[i];
+    constraints.joint_constraints.push_back(joint_constraint);
+  }
 
   req.motion_plan_request.group_name = move_group_name_;
   req.motion_plan_request.goal_constraints.push_back(constraints);
@@ -452,23 +452,20 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
     //goal.goal.path_tolerance = 1.0;
     //goal.goal.trajectory.joint_names
 
+    size_t num_joints = joint_names_.size();
+
     goal.trajectory.joint_names = joint_names_;
     goal.trajectory.points.resize(1);
 
-    goal.trajectory.points[0].positions.resize(2);
+    goal.trajectory.points[0].positions.resize(num_joints);
+    goal.trajectory.points[0].velocities.resize(num_joints);
+    goal.trajectory.points[0].accelerations.resize(num_joints);
 
-    goal.trajectory.points[0].positions[0] = desAngle[0];
-    goal.trajectory.points[0].positions[1] = desAngle[1];
-
-    goal.trajectory.points[0].velocities.resize(2);
-
-    goal.trajectory.points[0].velocities[0] = 0.0;
-    goal.trajectory.points[0].velocities[1] = 0.0;
-
-    goal.trajectory.points[0].accelerations.resize(2);
-
-    goal.trajectory.points[0].accelerations[0] = 0.0;
-    goal.trajectory.points[0].accelerations[1] = 0.0;
+    for (size_t i = 0; i < num_joints; ++i){
+      goal.trajectory.points[0].positions[i] = desAngle[i];
+      goal.trajectory.points[0].velocities[i] = 0.0;
+      goal.trajectory.points[0].accelerations[i] = 0.0;
+    }
 
     goal.trajectory.points[0].time_from_start = ros::Duration(command_goal_time_from_start_);
 
