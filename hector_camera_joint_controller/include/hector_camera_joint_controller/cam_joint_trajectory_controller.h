@@ -112,6 +112,7 @@ private:
 
   double control_loop_period_;
   double command_goal_time_from_start_;
+  double max_axis_speed_;
 
   bool joint_trajectory_preempted_;
 

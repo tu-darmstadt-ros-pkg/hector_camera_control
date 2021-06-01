@@ -92,7 +92,12 @@ void CamJointTrajControl::Init()
 
   lookat_frame_ = std::string("sensor_head_mount_link");
   pnh_.getParam("lookat_reference_frame", lookat_frame_);
+  
+  command_goal_time_from_start_ = 0.3;
   pnh_.getParam("command_goal_time_from_start", command_goal_time_from_start_);
+  
+  max_axis_speed_ = 0.0;
+  pnh_.getParam("max_axis_speed", max_axis_speed_);
 
   double default_interval_double = 1.0;
   pnh_.getParam("default_interval", default_interval_double);
@@ -446,8 +451,9 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
   //std::cout << "\nangles:"  << " pitch_diff: " <<  error_pitch << " yaw diff:" << error_yaw << "\n";
 
   if (!use_direct_position_commands_){
+      
     control_msgs::FollowJointTrajectoryGoal goal;
-
+      
     goal.goal_time_tolerance = ros::Duration(1.0);
     //goal.goal.path_tolerance = 1.0;
     //goal.goal.trajectory.joint_names
@@ -467,7 +473,24 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
       goal.trajectory.points[0].accelerations[i] = 0.0;
     }
 
-    goal.trajectory.points[0].time_from_start = ros::Duration(command_goal_time_from_start_);
+    if (max_axis_speed_ != 0.0){
+      double max_diff = 0.0;
+      
+      if (num_joints == 1){
+        max_diff = diff_1;
+      }else{
+        max_diff = std::max(diff_1, diff_2);  
+      }
+    
+      double target_time = max_diff / max_axis_speed_;
+      
+      target_time = std::max (target_time, command_goal_time_from_start_);
+      
+      goal.trajectory.points[0].time_from_start = ros::Duration(target_time);
+      
+    }else{      
+      goal.trajectory.points[0].time_from_start = ros::Duration(command_goal_time_from_start_);
+    }
 
     //latest_gh_ = joint_traj_client_->sendGoal(goal);
     //boost::bind(&CamJointTrajControl::doneCb, this, _1, _2));
