@@ -477,9 +477,9 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
       double max_diff = 0.0;
       
       if (num_joints == 1){
-        max_diff = diff_1;
+        max_diff = std::abs(diff_1);
       }else{
-        max_diff = std::max(diff_1, diff_2);  
+        max_diff = std::max(std::abs(diff_1), std::abs(diff_2));  
       }
     
       double target_time = max_diff / max_axis_speed_;
