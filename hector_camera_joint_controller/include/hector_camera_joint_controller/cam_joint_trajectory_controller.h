@@ -49,16 +49,21 @@
 
 #include <control_msgs/FollowJointTrajectoryAction.h>
 #include <control_msgs/JointControllerState.h>
-#include <control_msgs/QueryTrajectoryState.h>
 
 #include <hector_perception_msgs/LookAtAction.h>
 
-// Boost
-//#include <boost/thread.hpp>
-//#include <boost/bind.hpp>
+#include <moveit/robot_model_loader/robot_model_loader.h>
+#include <moveit/robot_state/robot_state.h>
 
 namespace cam_control
 {
+
+struct TargetPointPatternElement{
+  geometry_msgs::PointStamped target_point;
+  ros::Duration stay_time;
+  double goto_velocity_factor;
+};
+
 
 class CamJointTrajControl
 {
@@ -68,48 +73,34 @@ public:
   virtual ~CamJointTrajControl();
 
 protected:
-  //virtual void Load(physics::ModelPtr _model, sdf::ElementPtr _sdf);
   void Init();
   void Reset();
-  //void ComputeCommand();
-
-  void jointTrajStateCb(const control_msgs::JointControllerState::ConstPtr& msg);
 
   void controlTimerCallback(const ros::TimerEvent& event);
 
 private:
+  void getJointNamesFromMoveGroup();
+  void getJointNamesFromController(ros::NodeHandle& nh);
+
+  bool planAndMoveToPoint(const geometry_msgs::PointStamped& point, double velocity_scaling_factor = 1.0);
   bool ComputeDirectionForPoint(const geometry_msgs::PointStamped& lookat_point, geometry_msgs::QuaternionStamped& orientation);
   void ComputeAndSendJointCommand(const geometry_msgs::QuaternionStamped& command_to_use);
-  //void publish_joint_states();
 
-  //void doneCb(const actionlib::SimpleClientGoalState& state,
-  //            const control_msgs::FollowJointTrajectoryResultConstPtr& result);
-  void transistionCb(actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> gh);
+  void transitionCb(actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> gh);
 
-  //void lookAtGoalCallback(actionlib::ServerGoalHandle<hector_perception_msgs::LookAtAction> goal);
-  //void lookAtPreemptCallback(actionlib::ServerGoalHandle<hector_perception_msgs::LookAtActionGoal> preempt);
   void lookAtGoalCallback();
   void lookAtPreemptCallback();
 
-  bool loadPattern(const std::string& pattern_name);
+  void trajActionStatusCallback(const actionlib_msgs::GoalStatusArrayConstPtr& msg);
 
+  void stopControllerTrajExecution();
 
-private:
+  bool loadPatterns();
 
-  // Simulation time of the last update
-  //ros::Time prevUpdateTime;
+  bool findPattern(const std::string& pattern_name);
 
+  void cmdCallback(const geometry_msgs::QuaternionStamped::ConstPtr& cmd_msg);
 
-  struct Servo {
-    std::string name;
-    Eigen::Vector3d axis;
-    //physics::JointPtr joint;
-    float velocity;
-    Servo() : velocity() {}
-  } servo[3];
-
-  unsigned int countOfServos;
-  unsigned int orderOfAxes[3];
   unsigned int rotationConv;
 
   std::string controller_namespace_;
@@ -119,8 +110,9 @@ private:
   std::string default_look_dir_frame_;
   bool stabilize_default_look_dir_frame_;
 
-  double control_rate_;
+  double control_loop_period_;
   double command_goal_time_from_start_;
+  double max_axis_speed_;
 
   bool joint_trajectory_preempted_;
 
@@ -136,42 +128,47 @@ private:
 
   ros::Timer control_timer;
 
-  //ros::Publisher jointStatePub_;
   ros::Subscriber sub_;
   tf::TransformListener* transform_listener_;
 
-  void cmdCallback(const geometry_msgs::QuaternionStamped::ConstPtr& cmd_msg);
+  ros::Publisher pattern_info_pub_;
 
-  //boost::mutex mutex;
+  ros::ServiceClient get_plan_service_client_;
+
+  std::string move_group_name_;
+  robot_model::RobotModelPtr moveit_robot_model_;
+  robot_state::RobotStatePtr moveit_robot_state_;
+  std::vector<std::string> joint_names_;
+
   geometry_msgs::QuaternionStamped::ConstPtr latest_orientation_cmd_;
-  control_msgs::JointControllerState::ConstPtr latest_joint_traj_state_;
-  control_msgs::QueryTrajectoryState::Response latest_queried_joint_traj_state_;
   Eigen::Quaterniond rotation_;
 
   boost::shared_ptr<actionlib::ActionClient<control_msgs::FollowJointTrajectoryAction> > joint_traj_client_;
-  ros::Subscriber joint_traj_state_sub_;
+  ros::Subscriber joint_trajectory_action_status_sub_;
 
-  boost::shared_ptr<actionlib::SimpleActionServer<hector_perception_msgs::LookAtAction> > look_at_server_;
+  std::shared_ptr<actionlib::SimpleActionServer<hector_perception_msgs::LookAtAction> > look_at_server_;
 
   std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> > gh_list_;
+
+  ros::Time last_plan_time_;
+  bool new_goal_received_;
 
   ros::Publisher servo_pub_1_;
   ros::Publisher servo_pub_2_;
 
-  struct PatternElement {
-    geometry_msgs::QuaternionStamped orientation;
-    ros::Duration interval;
-  };
-  std::vector<PatternElement> pattern_;
+  std::map<std::string, std::vector<TargetPointPatternElement> > patterns_;
+
   unsigned int pattern_index_;
+  std::string current_pattern_name_;
+
   ros::Duration default_interval_;
 
   std::string patterns_param_;
   ros::Time pattern_switch_time_;
 
   bool use_direct_position_commands_;
-
-
+  bool use_planning_based_pointing_;
+  bool disable_orientation_camera_command_input_;
 };
 
 }

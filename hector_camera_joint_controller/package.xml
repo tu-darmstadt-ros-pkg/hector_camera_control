@@ -1,5 +1,5 @@
 <?xml version="1.0"?>
-<package>
+<package format="2">
   <name>hector_camera_joint_controller</name>
   <version>0.0.0</version>
   <description>The hector_camera_joint_controller package</description>
@@ -11,21 +11,16 @@
   <license>BSD</license>
 
   <buildtool_depend>catkin</buildtool_depend>
-  <build_depend>control_msgs</build_depend>
-  <build_depend>geometry_msgs</build_depend>
-  <build_depend>roscpp</build_depend>
-  <build_depend>tf</build_depend>
-  <build_depend>cmake_modules</build_depend>
-  <build_depend>actionlib</build_depend>
-  <build_depend>hector_perception_msgs</build_depend>
-
-  <run_depend>control_msgs</run_depend>
-  <run_depend>geometry_msgs</run_depend>
-  <run_depend>roscpp</run_depend>
-  <run_depend>tf</run_depend>
-  <run_depend>cmake_modules</run_depend>
-  <run_depend>actionlib</run_depend>
-  <run_depend>hector_perception_msgs</run_depend>
+  <depend>control_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>roscpp</depend>
+  <depend>tf</depend>
+  <depend>cmake_modules</depend>
+  <depend>actionlib</depend>
+  <depend>moveit_msgs</depend>
+  <depend>hector_perception_msgs</depend>
+  <depend>moveit_core</depend>
+  <depend>moveit_ros_planning</depend>
 
   <export>
   </export>

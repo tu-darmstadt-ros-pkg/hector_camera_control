@@ -8,10 +8,13 @@ find_package(catkin REQUIRED COMPONENTS
   tf
   cmake_modules
   actionlib
+  moveit_msgs
   hector_perception_msgs
+  moveit_core
+  moveit_ros_planning
 )
 
-find_package(Eigen REQUIRED)
+find_package(Eigen3 REQUIRED)
 include_directories(${EIGEN_INCLUDE_DIRS} include)
 add_definitions(${EIGEN_DEFINITIONS})
 
@@ -35,4 +38,20 @@ target_link_libraries(cam_joint_trajectory_controller
   ${catkin_LIBRARIES}
 )
 
+#############
+## Install ##
+#############
+
+# all install targets should use catkin DESTINATION variables
+# See http://ros.org/doc/api/catkin/html/adv_user_guide/variables.html
+
+install(TARGETS cam_joint_trajectory_controller
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+install(DIRECTORY
+  config
+  launch
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
 
