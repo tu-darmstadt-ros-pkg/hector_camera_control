@@ -525,7 +525,7 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
 
 
       if (!new_goal_received_){
-        if (lookat_oneshot_){
+        if (lookat_oneshot_ && !use_direct_position_commands_){
           std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> >::iterator it = gh_list_.begin();
 
           while  (it != gh_list_.end()){
@@ -660,6 +660,12 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
     }
 
   }
+}
+
+void CamJointTrajControl::directPointingTimerCallback(const ros::TimerEvent& event)
+{
+  control_mode_ = MODE_OFF;
+  look_at_server_->setSucceeded();
 }
 
 void CamJointTrajControl::transitionCb(actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> gh)
@@ -803,6 +809,16 @@ void CamJointTrajControl::lookAtGoalCallback()
     lookat_point_ = goal->look_at_target.target_point;
     lookat_oneshot_ = goal->look_at_target.no_continuous_tracking;
     control_mode_ = MODE_LOOKAT;
+
+    if (use_direct_position_commands_){
+      reached_lookat_target_timer_ = nh_.createTimer(
+            ros::Duration(4.0),
+            &CamJointTrajControl::directPointingTimerCallback,
+            this,
+            true,
+            true);
+
+    }
 
     new_goal_received_ = true;
   }

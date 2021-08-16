@@ -76,6 +76,7 @@ protected:
   void Init();
   void Reset();
 
+  void directPointingTimerCallback(const ros::TimerEvent& event);
   void controlTimerCallback(const ros::TimerEvent& event);
 
 private:
@@ -155,6 +156,7 @@ private:
 
   ros::Publisher servo_pub_1_;
   ros::Publisher servo_pub_2_;
+  ros::Timer reached_lookat_target_timer_;
 
   std::map<std::string, std::vector<TargetPointPatternElement> > patterns_;
 
