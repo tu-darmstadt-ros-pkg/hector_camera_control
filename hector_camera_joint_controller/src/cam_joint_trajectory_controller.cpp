@@ -57,11 +57,14 @@ CamJointTrajControl::CamJointTrajControl()
   : joint_trajectory_preempted_(false)
   , patterns_param_("camera/patterns")
   , control_mode_(MODE_OFF)
+  , lookat_oneshot_(true)
   , use_direct_position_commands_(false)
   , new_goal_received_(false)
   , pattern_index_ (0)
   , use_planning_based_pointing_(true)
   , disable_orientation_camera_command_input_(false)
+  , stabilize_default_look_dir_frame_(false)
+  , last_plan_time_(ros::Time(0))
 {
   transform_listener_ = 0;
 
@@ -87,7 +90,10 @@ void CamJointTrajControl::Init()
   pnh_.getParam("controller_namespace", controller_namespace_);
   pnh_.getParam("control_loop_period", control_loop_period_);
   pnh_.getParam("default_direction_reference_frame", default_look_dir_frame_);
+
+  stabilize_default_look_dir_frame_ = false;
   pnh_.getParam("stabilize_default_direction_reference", stabilize_default_look_dir_frame_);
+
   pnh_.getParam("robot_link_reference_frame", robot_link_reference_frame_);
 
   lookat_frame_ = std::string("sensor_head_mount_link");
@@ -156,7 +162,6 @@ void CamJointTrajControl::Init()
 
   //Sleep for short time to let tf receive messages
   ros::Duration(1.0).sleep();
-
 
   look_at_server_ = std::make_shared<actionlib::SimpleActionServer<hector_perception_msgs::LookAtAction>>(pnh_, "look_at", false);
   look_at_server_->registerGoalCallback(boost::bind(&CamJointTrajControl::lookAtGoalCallback, this));
@@ -387,7 +392,7 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
 
     default:
       ROS_ERROR("Invalid joint rotation convention!");
-      break;
+      return;
   }
 
   Eigen::Vector3d desAngle(
@@ -395,14 +400,10 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
     asin(temp[2]),
     atan2(temp[3], temp[4]));
 
-
-
-
   tf::StampedTransform current_state_transform;
   try{
     transform_listener_->lookupTransform(robot_link_reference_frame_, lookat_frame_, ros::Time(0), current_state_transform);
-  }
-  catch (tf::TransformException ex){
+  }catch (tf::TransformException ex){
     ROS_WARN("Failed to transform, not sending command to joints: %s",ex.what());
     return;
   }
@@ -421,7 +422,6 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
       diff_1 = error_yaw;
       diff_2 = error_pitch;
 
-
       break;
 
     case xyz:
@@ -435,14 +435,7 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
 
     default:
       ROS_ERROR("Invalid joint rotation convention!");
-      break;
-  }
-
-  if (control_mode_ == MODE_LOOKAT && lookat_oneshot_){
-    ROS_WARN_THROTTLE(5.0,"Lookat with return not implemented yet!");
-    //look_at_server_->setSucceeded();
-    //control_mode_ = MODE_OFF;
-
+      return;
   }
 
   //Eigen::Vector3d angles = rotation_.matrix().eulerAngles(2, 0, 2);
@@ -492,9 +485,6 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
       goal.trajectory.points[0].time_from_start = ros::Duration(command_goal_time_from_start_);
     }
 
-    //latest_gh_ = joint_traj_client_->sendGoal(goal);
-    //boost::bind(&CamJointTrajControl::doneCb, this, _1, _2));
-
     gh_list_.push_back(joint_traj_client_->sendGoal(goal, boost::bind(&CamJointTrajControl::transitionCb, this, _1)));
   }else{
     servo_pub_1_.publish(desAngle[0]);
@@ -521,14 +511,11 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
 
     if (control_mode_ == MODE_LOOKAT){
 
-      //lookat_oneshot_ = true;
-
-
       if (!new_goal_received_){
         if (lookat_oneshot_ && !use_direct_position_commands_){
           std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> >::iterator it = gh_list_.begin();
 
-          while  (it != gh_list_.end()){
+          while (it != gh_list_.end()){
 
             if (it->getCommState() == actionlib::CommState::ACTIVE ){
               ROS_DEBUG("Controller active, waiting to return");
@@ -537,17 +524,17 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
             it++;
           }
         }else{
-          if ((ros::Time::now() - last_plan_time_).toSec() < 0.8){
+          if (use_planning_based_pointing_ &&
+              ((ros::Time::now() - last_plan_time_).toSec() < 0.8))
+          {
             ROS_DEBUG("Replanning with fixed rate, skipping current iteration");
             return;
           }
-
         }
       }
 
       new_goal_received_ = false;
-      
-      
+
       if (use_planning_based_pointing_){
 
         ros::Rate rate (10);
@@ -571,12 +558,12 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
         }
       }else{
         geometry_msgs::QuaternionStamped command_quat;
-        this->ComputeDirectionForPoint(this->lookat_point_, command_quat);
-        this->ComputeAndSendJointCommand(command_quat);
+        if (this->ComputeDirectionForPoint(this->lookat_point_, command_quat))
+        {
+          this->ComputeAndSendJointCommand(command_quat);
+        }
         return;
       }
-
-
 
     }else if (control_mode_ == MODE_PATTERN){
       ros::Time now = ros::Time::now();
@@ -585,7 +572,6 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
       if ((gh_list_.size() == 0) && (now > pattern_switch_time_)){
         ROS_INFO("Planning to next target point with index %d", (int) pattern_index_);
           
-
         const std::vector<TargetPointPatternElement>& curr_pattern = patterns_.at(current_pattern_name_);
         const TargetPointPatternElement& curr_target = curr_pattern[pattern_index_];
 
@@ -607,19 +593,18 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
           pattern_index_ = (pattern_index_ + 1) % curr_pattern.size();
         }else{
           geometry_msgs::QuaternionStamped command_quat;
-          this->ComputeDirectionForPoint(curr_target.target_point, command_quat);
-          this->ComputeAndSendJointCommand(command_quat);
+          if (this->ComputeDirectionForPoint(this->lookat_point_, command_quat))
+          {
+            this->ComputeAndSendJointCommand(command_quat);
+          }
         }
 
-        
         return;
 
       }else{
         ROS_DEBUG("Waiting in pattern mode");
         return;
       }
-
-      //this->ComputeAndSendJointCommand(pattern_[pattern_index_].orientation);
 
     }else if (control_mode_ == MODE_OFF){
       //If set to stabilized in params, do it
@@ -645,7 +630,6 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
         this->ComputeAndSendJointCommand(command_to_use);
       }
 
-
     }else{
       ROS_WARN("In unknown control mode %d, not commanding joints.", (int)control_mode_);
     }
@@ -658,7 +642,6 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
         this->ComputeAndSendJointCommand(*latest_orientation_cmd_);
       }
     }
-
   }
 }
 
