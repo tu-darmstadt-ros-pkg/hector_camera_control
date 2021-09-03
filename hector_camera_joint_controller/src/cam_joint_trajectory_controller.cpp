@@ -45,6 +45,13 @@ enum
   FIRST = 0, SECOND = 1, THIRD = 2
 };
 
+/**
+ * MODE_OFF: Does not send command to joints (unless stabilizing camera)
+ * MODE_LOOKAT: Action server active, pointing cam at target
+ * MODE_PATTERN: Follow a predefined pattern of waypoints
+ * MODE_OVERRIDE: Unused
+ * MODE_ORIENTATION: User commanded orientation
+ */
 typedef enum { MODE_OFF = 0, MODE_LOOKAT = 1, MODE_PATTERN = 2, MODE_OVERRIDE = 4, MODE_ORIENTATION = 5 } ControlMode;
 
 enum
@@ -137,7 +144,6 @@ void CamJointTrajControl::Init()
   if (use_direct_position_commands_){
     servo_pub_1_ = nh_.advertise<std_msgs::Float64>("servo1_command", 1);
     servo_pub_2_ = nh_.advertise<std_msgs::Float64>("servo2_command", 1);
-
   }else{
     // Actions, subscribers
     joint_traj_client_.reset(new actionlib::ActionClient<control_msgs::FollowJointTrajectoryAction>(controller_nh_.getNamespace() + "/follow_joint_trajectory"));
@@ -443,6 +449,27 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
   //std::cout << "\nangles:\n" << desAngle << "\n" << "roll_diff: " << roll << " pitch_diff: " <<  pitch << " yaw diff:" << yaw << "\n";
   //std::cout << "\nangles:"  << " pitch_diff: " <<  error_pitch << " yaw diff:" << error_yaw << "\n";
 
+  double target_time = 0.0;
+  size_t num_joints = 2;
+
+  if (!use_direct_position_commands_){
+    num_joints = joint_names_.size();
+  }
+
+  if (max_axis_speed_ != 0.0){
+    double max_diff = 0.0;
+
+    if (num_joints == 1){
+      max_diff = std::abs(diff_1);
+    }else{
+      max_diff = std::max(std::abs(diff_1), std::abs(diff_2));
+    }
+
+    target_time = max_diff / max_axis_speed_;
+
+    target_time = std::max (target_time, command_goal_time_from_start_);
+  }
+
   if (!use_direct_position_commands_){
       
     control_msgs::FollowJointTrajectoryGoal goal;
@@ -450,8 +477,6 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
     goal.goal_time_tolerance = ros::Duration(1.0);
     //goal.goal.path_tolerance = 1.0;
     //goal.goal.trajectory.joint_names
-
-    size_t num_joints = joint_names_.size();
 
     goal.trajectory.joint_names = joint_names_;
     goal.trajectory.points.resize(1);
@@ -466,27 +491,23 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
       goal.trajectory.points[0].accelerations[i] = 0.0;
     }
 
-    if (max_axis_speed_ != 0.0){
-      double max_diff = 0.0;
-      
-      if (num_joints == 1){
-        max_diff = std::abs(diff_1);
-      }else{
-        max_diff = std::max(std::abs(diff_1), std::abs(diff_2));  
-      }
-    
-      double target_time = max_diff / max_axis_speed_;
-      
-      target_time = std::max (target_time, command_goal_time_from_start_);
-      
+    if (target_time != 0.0){
       goal.trajectory.points[0].time_from_start = ros::Duration(target_time);
-      
     }else{      
       goal.trajectory.points[0].time_from_start = ros::Duration(command_goal_time_from_start_);
     }
 
     gh_list_.push_back(joint_traj_client_->sendGoal(goal, boost::bind(&CamJointTrajControl::transitionCb, this, _1)));
   }else{
+    if (control_mode_ == MODE_LOOKAT){
+      reached_lookat_target_timer_ = nh_.createTimer(
+          ros::Duration(target_time),
+          &CamJointTrajControl::directPointingTimerCallback,
+          this,
+          true,
+          true);
+    }
+
     servo_pub_1_.publish(desAngle[0]);
     servo_pub_2_.publish(desAngle[1]);
   }
@@ -512,6 +533,12 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
     if (control_mode_ == MODE_LOOKAT){
 
       if (!new_goal_received_){
+        // Wait for Action to finish when in oneshot or when repeatedly planning
+        if (lookat_oneshot_ ||
+            (use_planning_based_pointing_ && ((ros::Time::now() - last_plan_time_).toSec() < 0.8))){
+          return;
+        }
+        /*
         if (lookat_oneshot_ && !use_direct_position_commands_){
           std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> >::iterator it = gh_list_.begin();
 
@@ -531,6 +558,7 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
             return;
           }
         }
+        */
       }
 
       new_goal_received_ = false;
@@ -543,8 +571,9 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
         {
           if (this->planAndMoveToPoint(this->lookat_point_))
           {
-            if (lookat_oneshot_)
+            if (lookat_oneshot_){
               control_mode_ = MODE_OFF;
+            }
             return;
           }
           rate.sleep();
@@ -635,7 +664,6 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
     }
   }else{
     //Not in Action mode
-    ROS_DEBUG("joint_trajectory_preempted_ true");
 
     if (control_mode_ == MODE_ORIENTATION){
       if (latest_orientation_cmd_.get()){
@@ -648,7 +676,11 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
 void CamJointTrajControl::directPointingTimerCallback(const ros::TimerEvent& event)
 {
   control_mode_ = MODE_OFF;
-  look_at_server_->setSucceeded();
+  if (look_at_server_->isActive()){
+    look_at_server_->setSucceeded();
+  }else{
+    ROS_WARN("Expected look_at_server to be active in pointing timer callback, but not the case!");
+  }
 }
 
 void CamJointTrajControl::transitionCb(actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> gh)
@@ -792,16 +824,6 @@ void CamJointTrajControl::lookAtGoalCallback()
     lookat_point_ = goal->look_at_target.target_point;
     lookat_oneshot_ = goal->look_at_target.no_continuous_tracking;
     control_mode_ = MODE_LOOKAT;
-
-    if (use_direct_position_commands_){
-      reached_lookat_target_timer_ = nh_.createTimer(
-            ros::Duration(4.0),
-            &CamJointTrajControl::directPointingTimerCallback,
-            this,
-            true,
-            true);
-
-    }
 
     new_goal_received_ = true;
   }
