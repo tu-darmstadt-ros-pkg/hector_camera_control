@@ -169,6 +169,8 @@ private:
   ros::Time pattern_switch_time_;
 
   bool use_direct_position_commands_;
+  double direct_position_command_default_wait_time_;
+  
   bool use_planning_based_pointing_;
   bool disable_orientation_camera_command_input_;
 };

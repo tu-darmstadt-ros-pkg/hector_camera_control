@@ -117,6 +117,9 @@ void CamJointTrajControl::Init()
 
 
   pnh_.getParam("use_direct_position_commands", use_direct_position_commands_);
+  direct_position_command_default_wait_time_ = 4.0;
+  pnh_.getParam("direct_position_command_default_wait_time", direct_position_command_default_wait_time_);
+  
   pnh_.getParam("use_planning_based_pointing", use_planning_based_pointing_);
 
   if (type_string == "xyz"){
@@ -795,7 +798,7 @@ void CamJointTrajControl::lookAtGoalCallback()
 
     if (use_direct_position_commands_){
       reached_lookat_target_timer_ = nh_.createTimer(
-            ros::Duration(4.0),
+            ros::Duration(direct_position_command_default_wait_time_),
             &CamJointTrajControl::directPointingTimerCallback,
             this,
             true,
