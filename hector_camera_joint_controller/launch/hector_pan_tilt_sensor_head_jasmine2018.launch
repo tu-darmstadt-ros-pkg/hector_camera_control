@@ -18,6 +18,6 @@
     <param name="stabilize_default_direction_reference" value="false" />
 
     <param name="joint_order_type" value="zyx" />
-    <param name="use_planning_based_pointing" value="false" />    
+    <param name="use_planning_based_pointing" value="true" />    
   </node>
 </launch>
