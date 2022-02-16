@@ -65,6 +65,7 @@ CamJointTrajControl::CamJointTrajControl()
   , disable_orientation_camera_command_input_(false)
   , stabilize_default_look_dir_frame_(false)
   , last_plan_time_(ros::Time(0))
+  , pitch_axis_factor_(1.0)
 {
   transform_listener_ = 0;
 
@@ -114,6 +115,13 @@ void CamJointTrajControl::Init()
 
   std::string type_string;
   pnh_.getParam("joint_order_type", type_string);
+  
+  bool invert_pitch_axis_commands;
+  pnh_.getParam("invert_pitch_axis_commands", invert_pitch_axis_commands);
+  
+  if (invert_pitch_axis_commands){
+    pitch_axis_factor_ = -1.0;
+  }
 
 
   pnh_.getParam("use_direct_position_commands", use_direct_position_commands_);
@@ -424,6 +432,8 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
       error_pitch = angles::shortest_angular_distance(desAngle[1], pitch);
       diff_1 = error_yaw;
       diff_2 = error_pitch;
+      
+      desAngle[1] *= pitch_axis_factor_; 
 
       break;
 
@@ -433,6 +443,8 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
       error_roll = angles::shortest_angular_distance(desAngle[1], yaw);
       diff_1 = error_pitch;
       diff_2 = error_roll;
+      
+      desAngle[0] *= pitch_axis_factor_; 
 
       break;
 
