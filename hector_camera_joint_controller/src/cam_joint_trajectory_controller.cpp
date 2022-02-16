@@ -214,8 +214,12 @@ void CamJointTrajControl::getJointNamesFromController(ros::NodeHandle& nh)
   bool retrieved_names = false;
   control_msgs::QueryTrajectoryState::Response queried_joint_traj_state;
 
+  int num_attempts = 0;
+  
   do{
-    if (query_joint_traj_state_client.waitForExistence(ros::Duration(2.0))){
+    if (query_joint_traj_state_client.waitForExistence(ros::Duration(5.0))){
+      
+      
       control_msgs::QueryTrajectoryState srv;
 
       ros::Duration(1.0).sleep();
@@ -238,8 +242,13 @@ void CamJointTrajControl::getJointNamesFromController(ros::NodeHandle& nh)
         joint_names_ = queried_joint_traj_state.name;
 
       }
+      num_attempts++;
     }else{
-      ROS_ERROR("Could not retrieve controller state (and joint names), continuing to try.");
+      if (num_attempts < 10){
+        ROS_INFO_STREAM("Could not retrieve controller state (and joint names) after " << num_attempts << " attempts, continuing to try.");
+      }else{
+        ROS_ERROR_STREAM("Could not retrieve controller state (and joint names) after " << num_attempts << " attempts, continuing to try.");
+      }
     }
 
   }while (!retrieved_names);
@@ -887,7 +896,7 @@ bool CamJointTrajControl::loadPatterns()
 
   if (!nh.getParamCached(patterns_param_, description))
   {
-    ROS_ERROR("Could not find patterns param! Not loading any.");
+    ROS_INFO("Could not find patterns param! Not loading any.");
       return false;
   }
 
