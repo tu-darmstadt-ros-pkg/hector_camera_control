@@ -807,6 +807,7 @@ void CamJointTrajControl::lookAtGoalCallback()
     lookat_point_ = goal->look_at_target.target_point;
     lookat_oneshot_ = goal->look_at_target.no_continuous_tracking;
     control_mode_ = MODE_LOOKAT;
+    ROS_INFO("Starting LookAt Action with: no_continuous_tracking: %d", goal->look_at_target.no_continuous_tracking);
 
     if (use_direct_position_commands_){
       reached_lookat_target_timer_ = nh_.createTimer(
