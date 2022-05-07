@@ -34,9 +34,12 @@
 #include <std_msgs/builtin_double.h>
 
 #include <moveit_msgs/GetMotionPlan.h>
+#include <moveit_msgs/GetPlanningScene.h>
 
 #include <hector_perception_msgs/CameraPatternInfo.h>
 #include <control_msgs/QueryTrajectoryState.h>
+#include <moveit/planning_scene/planning_scene.h>
+
 
 namespace cam_control {
 
@@ -141,6 +144,10 @@ void CamJointTrajControl::Init()
       getJointNamesFromController(controller_nh_);
     }else{
       getJointNamesFromMoveGroup();
+      //tf_buffer_state_monitor_ = std::make_shared<tf2_ros::Buffer>();
+      //state_monitor_ = std::make_unique<planning_scene_monitor::CurrentStateMonitor>(moveit_robot_model_,tf_buffer_state_monitor_);
+      //state_monitor_->startStateMonitor("joint_states");
+      get_planning_scene_ = nh_.serviceClient<moveit_msgs::GetPlanningScene>("/get_planning_scene");
     }
   }
 
@@ -495,11 +502,51 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
     //latest_gh_ = joint_traj_client_->sendGoal(goal);
     //boost::bind(&CamJointTrajControl::doneCb, this, _1, _2));
 
-    gh_list_.push_back(joint_traj_client_->sendGoal(goal, boost::bind(&CamJointTrajControl::transitionCb, this, _1)));
+    //Test if pose leads to self collisions -
+    planning_scene::PlanningScene planning_scene(moveit_robot_model_);
+    moveit_msgs::GetPlanningScene srv;
+    srv.request.components.components = srv.request.components.ROBOT_STATE;
+    if (this->get_planning_scene_.call(srv))
+    {
+      for(int i=0;i<srv.response.scene.robot_state.joint_state.name.size();i++){
+        planning_scene.getCurrentStateNonConst().setJointPositions(srv.response.scene.robot_state.joint_state.name[i],&srv.response.scene.robot_state.joint_state.position[i]);
+      }
+    }
+    collision_detection::CollisionRequest collision_request;
+    collision_detection::CollisionResult collision_result;
+    collision_request.contacts = false;// true; //activate for debugging
+    collision_request.max_contacts = 1000;
+    planning_scene.checkSelfCollision(collision_request, collision_result);
+    bool current_state_colliding = collision_result.collision;
+
+    //ROS_INFO_STREAM("Current state is " << (collision_result.collision ? "in" : "not in") << " self collision");
+    if(!collision_result.collision)
+    {
+      std::vector<double> joint_values = { desAngle[0], desAngle[1] };
+      moveit::core::RobotState& current_state = planning_scene.getCurrentStateNonConst();
+      //current_state.printStatePositions();
+      const moveit::core::JointModelGroup* joint_model_group = current_state.getJointModelGroup(move_group_name_);
+      current_state.setJointGroupPositions(joint_model_group, joint_values);
+      collision_result.clear();
+      planning_scene.checkSelfCollision(collision_request, collision_result);
+      if(collision_result.collision)
+        ROS_INFO_STREAM("Sensor won't move because of detected collision");
+      //ROS_INFO_STREAM("Planned state is " << (collision_result.collision ? "in" : "not in") << " self collision");
+      collision_detection::CollisionResult::ContactMap::const_iterator it;
+      //for (it = collision_result.contacts.begin(); it != collision_result.contacts.end(); ++it)
+      //{
+      //  ROS_INFO("Contact between: %s and %s", it->first.first.c_str(), it->first.second.c_str());
+      //}
+    }
+    if (!collision_result.collision or current_state_colliding)
+    {
+      gh_list_.push_back(joint_traj_client_->sendGoal(goal, boost::bind(&CamJointTrajControl::transitionCb, this, _1)));
+    }
   }else{
     servo_pub_1_.publish(desAngle[0]);
     servo_pub_2_.publish(desAngle[1]);
   }
+  latest_orientation_cmd_.reset();
 }
 
 // NEW: Store the velocities from the ROS message

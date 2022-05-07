@@ -54,6 +54,7 @@
 
 #include <moveit/robot_model_loader/robot_model_loader.h>
 #include <moveit/robot_state/robot_state.h>
+#include <moveit/planning_scene_monitor/current_state_monitor.h>
 
 namespace cam_control
 {
@@ -139,6 +140,7 @@ private:
   robot_model::RobotModelPtr moveit_robot_model_;
   robot_state::RobotStatePtr moveit_robot_state_;
   std::vector<std::string> joint_names_;
+  ros::ServiceClient get_planning_scene_;
 
   geometry_msgs::QuaternionStamped::ConstPtr latest_orientation_cmd_;
   Eigen::Quaterniond rotation_;
