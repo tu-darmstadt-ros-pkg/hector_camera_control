@@ -148,6 +148,7 @@ void CamJointTrajControl::Init()
       //state_monitor_ = std::make_unique<planning_scene_monitor::CurrentStateMonitor>(moveit_robot_model_,tf_buffer_state_monitor_);
       //state_monitor_->startStateMonitor("joint_states");
       get_planning_scene_ = nh_.serviceClient<moveit_msgs::GetPlanningScene>("/get_planning_scene");
+      ROS_INFO_STREAM("-------------initialized sensor head camera controller with collision checks---------------------");
     }
   }
 
@@ -516,7 +517,7 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
     }
     collision_detection::CollisionRequest collision_request;
     collision_detection::CollisionResult collision_result;
-    collision_request.contacts = false;// true; //activate for debugging
+    collision_request.contacts = true;// true; //activate for debugging
     collision_request.max_contacts = 100;
     planning_scene.checkSelfCollision(collision_request, collision_result);
     bool current_state_colliding = collision_result.collision;
@@ -534,13 +535,14 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
         ROS_INFO_STREAM("Sensor won't move because of detected collision");
       //ROS_INFO_STREAM("Planned state is " << (collision_result.collision ? "in" : "not in") << " self collision");
       collision_detection::CollisionResult::ContactMap::const_iterator it;
-      //for (it = collision_result.contacts.begin(); it != collision_result.contacts.end(); ++it)
-      //{
-       // ROS_INFO("Contact between: %s and %s", it->first.first.c_str(), it->first.second.c_str());
-      //}
+      for (it = collision_result.contacts.begin(); it != collision_result.contacts.end(); ++it)
+      {
+        ROS_INFO("Contact between: %s and %s", it->first.first.c_str(), it->first.second.c_str());
+      }
     }
     if (!collision_result.collision or current_state_colliding)
     {
+      ROS_INFO_STREAM("Sensor head movement is valid");
       gh_list_.push_back(joint_traj_client_->sendGoal(goal, boost::bind(&CamJointTrajControl::transitionCb, this, _1)));
     }
   }else{
