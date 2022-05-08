@@ -504,6 +504,8 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
 
     //Test if pose leads to self collisions -
     planning_scene::PlanningScene planning_scene(moveit_robot_model_);
+    // ignore collision between these links, only padding collides and because of this camera cannot look upwards
+    planning_scene.getAllowedCollisionMatrixNonConst().setEntry("sensor_head_thermal_cam_frame","chassis_link",true);
     moveit_msgs::GetPlanningScene srv;
     srv.request.components.components = srv.request.components.ROBOT_STATE;
     if (this->get_planning_scene_.call(srv))
@@ -515,10 +517,9 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
     collision_detection::CollisionRequest collision_request;
     collision_detection::CollisionResult collision_result;
     collision_request.contacts = false;// true; //activate for debugging
-    collision_request.max_contacts = 1000;
+    collision_request.max_contacts = 100;
     planning_scene.checkSelfCollision(collision_request, collision_result);
     bool current_state_colliding = collision_result.collision;
-
     //ROS_INFO_STREAM("Current state is " << (collision_result.collision ? "in" : "not in") << " self collision");
     if(!collision_result.collision)
     {
@@ -535,7 +536,7 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
       collision_detection::CollisionResult::ContactMap::const_iterator it;
       //for (it = collision_result.contacts.begin(); it != collision_result.contacts.end(); ++it)
       //{
-      //  ROS_INFO("Contact between: %s and %s", it->first.first.c_str(), it->first.second.c_str());
+       // ROS_INFO("Contact between: %s and %s", it->first.first.c_str(), it->first.second.c_str());
       //}
     }
     if (!collision_result.collision or current_state_colliding)
