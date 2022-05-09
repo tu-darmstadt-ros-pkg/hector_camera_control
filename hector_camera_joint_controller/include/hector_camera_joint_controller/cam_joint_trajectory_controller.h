@@ -171,6 +171,7 @@ private:
   bool use_direct_position_commands_;
   bool use_planning_based_pointing_;
   bool disable_orientation_camera_command_input_;
+  bool use_collision_checks_in_orientation_mode_;
 };
 
 }

@@ -92,6 +92,8 @@ void CamJointTrajControl::Init()
   pnh_.getParam("default_direction_reference_frame", default_look_dir_frame_);
   pnh_.getParam("stabilize_default_direction_reference", stabilize_default_look_dir_frame_);
   pnh_.getParam("robot_link_reference_frame", robot_link_reference_frame_);
+  use_collision_checks_in_orientation_mode_ = false;
+  pnh_.getParam("use_collision_checks_in_orientation_mode",use_collision_checks_in_orientation_mode_);
 
   lookat_frame_ = std::string("sensor_head_mount_link");
   pnh_.getParam("lookat_reference_frame", lookat_frame_);
@@ -502,48 +504,51 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
 
     //latest_gh_ = joint_traj_client_->sendGoal(goal);
     //boost::bind(&CamJointTrajControl::doneCb, this, _1, _2));
-
-    //Test if pose leads to self collisions -
-    planning_scene::PlanningScene planning_scene(moveit_robot_model_);
-    // ignore collision between these links, only padding collides and because of this camera cannot look upwards
-    planning_scene.getAllowedCollisionMatrixNonConst().setEntry("sensor_head_thermal_cam_frame","chassis_link",true);
-    moveit_msgs::GetPlanningScene srv;
-    srv.request.components.components = srv.request.components.ROBOT_STATE;
-    if (this->get_planning_scene_.call(srv))
-    {
-      for(int i=0;i<srv.response.scene.robot_state.joint_state.name.size();i++){
-        planning_scene.getCurrentStateNonConst().setJointPositions(srv.response.scene.robot_state.joint_state.name[i],&srv.response.scene.robot_state.joint_state.position[i]);
-      }
-    }
-    collision_detection::CollisionRequest collision_request;
-    collision_detection::CollisionResult collision_result;
-    collision_request.contacts = true;// true; //activate for debugging
-    collision_request.max_contacts = 100;
-    planning_scene.checkSelfCollision(collision_request, collision_result);
-    bool current_state_colliding = collision_result.collision;
-    //ROS_INFO_STREAM("Current state is " << (collision_result.collision ? "in" : "not in") << " self collision");
-    if(!collision_result.collision)
-    {
-      std::vector<double> joint_values = { desAngle[0], desAngle[1] };
-      moveit::core::RobotState& current_state = planning_scene.getCurrentStateNonConst();
-      //current_state.printStatePositions();
-      const moveit::core::JointModelGroup* joint_model_group = current_state.getJointModelGroup(move_group_name_);
-      current_state.setJointGroupPositions(joint_model_group, joint_values);
-      collision_result.clear();
-      planning_scene.checkSelfCollision(collision_request, collision_result);
-      if(collision_result.collision)
-        ROS_INFO_STREAM("Sensor won't move because of detected collision");
-      //ROS_INFO_STREAM("Planned state is " << (collision_result.collision ? "in" : "not in") << " self collision");
-      collision_detection::CollisionResult::ContactMap::const_iterator it;
-      for (it = collision_result.contacts.begin(); it != collision_result.contacts.end(); ++it)
-      {
-        ROS_INFO("Contact between: %s and %s", it->first.first.c_str(), it->first.second.c_str());
-      }
-    }
-    if (!collision_result.collision or current_state_colliding)
-    {
-      ROS_INFO_STREAM("Sensor head movement is valid");
+    if(!use_collision_checks_in_orientation_mode_){
       gh_list_.push_back(joint_traj_client_->sendGoal(goal, boost::bind(&CamJointTrajControl::transitionCb, this, _1)));
+    }else {
+      // Test if camera pose leads to self collisions -
+      planning_scene::PlanningScene planning_scene( moveit_robot_model_ );
+      // ignore collision between these links, only padding collides and because of this camera cannot look upwards
+      planning_scene.getAllowedCollisionMatrixNonConst().setEntry( "sensor_head_thermal_cam_frame",
+                                                                   "chassis_link", true );
+      moveit_msgs::GetPlanningScene srv;
+      srv.request.components.components = srv.request.components.ROBOT_STATE;
+      if ( this->get_planning_scene_.call( srv ) ) {
+        for ( int i = 0; i < srv.response.scene.robot_state.joint_state.name.size(); i++ ) {
+          planning_scene.getCurrentStateNonConst().setJointPositions(
+              srv.response.scene.robot_state.joint_state.name[i],
+              &srv.response.scene.robot_state.joint_state.position[i] );
+        }
+      }
+      collision_detection::CollisionRequest collision_request;
+      collision_detection::CollisionResult collision_result;
+      collision_request.contacts = false; // true; //activate for debugging
+      collision_request.max_contacts = 100;
+      planning_scene.checkSelfCollision( collision_request, collision_result );
+      bool current_state_colliding = collision_result.collision;
+      // ROS_INFO_STREAM("Current state is " << (collision_result.collision ? "in" : "not in") << " self collision");
+      if ( !collision_result.collision ) {
+        std::vector<double> joint_values = { desAngle[0], desAngle[1] };
+        moveit::core::RobotState &current_state = planning_scene.getCurrentStateNonConst();
+        // current_state.printStatePositions();
+        const moveit::core::JointModelGroup *joint_model_group =
+            current_state.getJointModelGroup( move_group_name_ );
+        current_state.setJointGroupPositions( joint_model_group, joint_values );
+        collision_result.clear();
+        planning_scene.checkSelfCollision( collision_request, collision_result );
+        if ( collision_result.collision )
+          ROS_INFO_STREAM( "Sensor won't move because of detected collision" );
+        collision_detection::CollisionResult::ContactMap::const_iterator it;
+        //for ( it = collision_result.contacts.begin(); it != collision_result.contacts.end(); ++it ) {
+        //  ROS_INFO( "Contact between: %s and %s", it->first.first.c_str(), it->first.second.c_str() );
+        //}
+      }
+      if ( !collision_result.collision or current_state_colliding ) {
+        ROS_INFO_STREAM( "Sensor head movement is valid" );
+        gh_list_.push_back( joint_traj_client_->sendGoal(
+            goal, boost::bind( &CamJointTrajControl::transitionCb, this, _1 ) ) );
+      }
     }
   }else{
     servo_pub_1_.publish(desAngle[0]);
