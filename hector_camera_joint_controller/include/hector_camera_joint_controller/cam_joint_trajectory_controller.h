@@ -102,6 +102,8 @@ private:
 
   void cmdCallback(const geometry_msgs::QuaternionStamped::ConstPtr& cmd_msg);
 
+  void cameraTwistCallback(const geometry_msgs::Twist::ConstPtr& twist_msg);
+
   unsigned int rotationConv;
 
   std::string controller_namespace_;
@@ -130,6 +132,7 @@ private:
   ros::Timer control_timer;
 
   ros::Subscriber sub_;
+  ros::Subscriber sub_camera_twist_;
   tf::TransformListener* transform_listener_;
 
   ros::Publisher pattern_info_pub_;

@@ -97,10 +97,10 @@ void CamJointTrajControl::Init()
 
   lookat_frame_ = std::string("sensor_head_mount_link");
   pnh_.getParam("lookat_reference_frame", lookat_frame_);
-  
+
   command_goal_time_from_start_ = 0.3;
   pnh_.getParam("command_goal_time_from_start", command_goal_time_from_start_);
-  
+
   max_axis_speed_ = 0.0;
   pnh_.getParam("max_axis_speed", max_axis_speed_);
 
@@ -146,21 +146,18 @@ void CamJointTrajControl::Init()
       getJointNamesFromController(controller_nh_);
     }else{
       getJointNamesFromMoveGroup();
-      //tf_buffer_state_monitor_ = std::make_shared<tf2_ros::Buffer>();
-      //state_monitor_ = std::make_unique<planning_scene_monitor::CurrentStateMonitor>(moveit_robot_model_,tf_buffer_state_monitor_);
-      //state_monitor_->startStateMonitor("joint_states");
       get_planning_scene_ = nh_.serviceClient<moveit_msgs::GetPlanningScene>("/get_planning_scene");
-      ROS_INFO_STREAM("-------------initialized sensor head camera controller with collision checks---------------------");
     }
   }
 
   control_timer = nh_.createTimer(ros::Duration(control_loop_period_), &CamJointTrajControl::controlTimerCallback, this, false, true);
-  
+
   pnh_.getParam("disable_orientation_camera_command_input", disable_orientation_camera_command_input_);
-  
+
   if (!disable_orientation_camera_command_input_){
-    sub_ = nh_.subscribe("/camera/command", 1, &CamJointTrajControl::cmdCallback, this);    
+    sub_ = nh_.subscribe("/camera/command", 1, &CamJointTrajControl::cmdCallback, this);
   }
+  sub_camera_twist_ = nh_.subscribe("/camera/command_twist", 1, &CamJointTrajControl::cameraTwistCallback, this);
 
   this->Reset();
 
@@ -461,9 +458,9 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
   //std::cout << "\nangles:"  << " pitch_diff: " <<  error_pitch << " yaw diff:" << error_yaw << "\n";
 
   if (!use_direct_position_commands_){
-      
+
     control_msgs::FollowJointTrajectoryGoal goal;
-      
+
     goal.goal_time_tolerance = ros::Duration(1.0);
     //goal.goal.path_tolerance = 1.0;
     //goal.goal.trajectory.joint_names
@@ -485,20 +482,20 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
 
     if (max_axis_speed_ != 0.0){
       double max_diff = 0.0;
-      
+
       if (num_joints == 1){
         max_diff = std::abs(diff_1);
       }else{
-        max_diff = std::max(std::abs(diff_1), std::abs(diff_2));  
+        max_diff = std::max(std::abs(diff_1), std::abs(diff_2));
       }
-    
+
       double target_time = max_diff / max_axis_speed_;
-      
+
       target_time = std::max (target_time, command_goal_time_from_start_);
-      
+
       goal.trajectory.points[0].time_from_start = ros::Duration(target_time);
-      
-    }else{      
+
+    }else{
       goal.trajectory.points[0].time_from_start = ros::Duration(command_goal_time_from_start_);
     }
 
@@ -601,8 +598,8 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
       }
 
       new_goal_received_ = false;
-      
-      
+
+
       if (use_planning_based_pointing_){
 
         ros::Rate rate (10);
@@ -639,7 +636,7 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
 
       if ((gh_list_.size() == 0) && (now > pattern_switch_time_)){
         ROS_INFO("Planning to next target point with index %d", (int) pattern_index_);
-          
+
 
         const std::vector<TargetPointPatternElement>& curr_pattern = patterns_.at(current_pattern_name_);
         const TargetPointPatternElement& curr_target = curr_pattern[pattern_index_];
@@ -666,7 +663,7 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
           this->ComputeAndSendJointCommand(command_quat);
         }
 
-        
+
         return;
 
       }else{
@@ -718,7 +715,7 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
 }
 
 void CamJointTrajControl::transitionCb(actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> gh)
-{  
+{
 
   std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> >::iterator it = gh_list_.begin();
 
@@ -770,7 +767,7 @@ void CamJointTrajControl::transitionCb(actionlib::ClientGoalHandle<control_msgs:
       it = gh_list_.erase(it);
     }else{
       ++it;
-    }    
+    }
   }
 
   // If we're done and have not requested continuous replanning, set succeeded.
@@ -790,7 +787,7 @@ void CamJointTrajControl::transitionCb(actionlib::ClientGoalHandle<control_msgs:
     pattern_index_ = (pattern_index_ + 1) % curr_pattern.size();
     pattern_switch_time_ = ros::Time::now() + curr_pattern[pattern_index_].stay_time;
   }
-    
+
 
   // If there are no goal handles left after we erased the ones that are DONE,
   // this means our last sent one got preempted by the server as someone else
@@ -876,7 +873,7 @@ void CamJointTrajControl::lookAtPreemptCallback()
 void CamJointTrajControl::trajActionStatusCallback(const actionlib_msgs::GoalStatusArrayConstPtr& msg)
 {
   ROS_DEBUG("Action status callback");
-  
+
   if (control_mode_ == MODE_PATTERN){
     for (size_t i = 0; i < msg->status_list.size(); ++i){
 
@@ -984,6 +981,88 @@ bool CamJointTrajControl::findPattern(const std::string& pattern_name)
 
   ROS_ERROR("Pattern %s not found in %s!", pattern_name.c_str(), patterns_param_.c_str());
   return false;
+}
+
+// receives twist message instead of quaternion orientation
+void CamJointTrajControl::cameraTwistCallback(const geometry_msgs::Twist::ConstPtr& twist_msg)
+{
+  if (!joint_trajectory_preempted_){
+    joint_trajectory_preempted_ = true;
+    ROS_INFO("[cam joint ctrl] Preempted running goal by orientation command.");
+  }
+  latest_orientation_cmd_.reset();
+  control_mode_ = MODE_ORIENTATION;
+  //get current joint states
+  planning_scene::PlanningScene planning_scene( moveit_robot_model_ );
+  // ignore collision between these links, only padding collides and because of this camera cannot look upwards
+  planning_scene.getAllowedCollisionMatrixNonConst().setEntry( "sensor_head_thermal_cam_frame",
+                                                               "chassis_link", true );
+  moveit_msgs::GetPlanningScene srv;
+  srv.request.components.components = srv.request.components.ROBOT_STATE;
+  if ( this->get_planning_scene_.call( srv ) ) {
+    for ( int i = 0; i < srv.response.scene.robot_state.joint_state.name.size(); i++ ) {
+      planning_scene.getCurrentStateNonConst().setJointPositions(
+          srv.response.scene.robot_state.joint_state.name[i],
+          &srv.response.scene.robot_state.joint_state.position[i] );
+    }
+  }
+  //planning_scene.getCurrentStateNonConst().printStatePositions();
+  collision_detection::CollisionRequest collision_request;
+  collision_detection::CollisionResult collision_result;
+  collision_request.contacts = false; // true; //activate for debugging
+  collision_request.max_contacts = 100;
+  planning_scene.checkSelfCollision( collision_request, collision_result );
+  bool current_state_colliding = collision_result.collision;
+  // ROS_INFO_STREAM("Current state is " << (collision_result.collision ? "in" : "not in") << " self collision");
+  std::vector<std::string>& names = srv.response.scene.robot_state.joint_state.name;
+  std::vector<double>& position = srv.response.scene.robot_state.joint_state.position;
+  size_t pan_index = std::find(names.begin(),names.end(),joint_names_[0]) - names.begin();
+  size_t tilt_index = std::find(names.begin(),names.end(),joint_names_[1])-  names.begin();
+  std::vector<double> joint_values = { position[pan_index]+ twist_msg->angular.z,position[tilt_index] +twist_msg->angular.y};
+  if ( !collision_result.collision ) {
+    moveit::core::RobotState &current_state = planning_scene.getCurrentStateNonConst();
+    // current_state.printStatePositions();
+    const moveit::core::JointModelGroup *joint_model_group =
+        current_state.getJointModelGroup( move_group_name_ );
+    current_state.setJointGroupPositions( joint_model_group, joint_values );
+    collision_result.clear();
+    planning_scene.checkSelfCollision( collision_request, collision_result );
+    if ( collision_result.collision )
+      ROS_INFO_STREAM( "Sensor won't move because of detected collision" );
+    collision_detection::CollisionResult::ContactMap::const_iterator it;
+    //for ( it = collision_result.contacts.begin(); it != collision_result.contacts.end(); ++it ) {
+    //  ROS_INFO( "Contact between: %s and %s", it->first.first.c_str(), it->first.second.c_str() );
+    //}
+  }
+  control_msgs::FollowJointTrajectoryGoal goal;
+
+  goal.goal_time_tolerance = ros::Duration(1.0);
+
+  size_t num_joints = joint_names_.size();
+
+  goal.trajectory.joint_names = joint_names_;
+  goal.trajectory.points.resize(1);
+
+  goal.trajectory.points[0].positions.resize(num_joints);
+  goal.trajectory.points[0].velocities.resize(num_joints);
+  goal.trajectory.points[0].accelerations.resize(num_joints);
+  goal.trajectory.points[0].time_from_start = ros::Duration(command_goal_time_from_start_);
+  for (size_t i = 0; i < num_joints; ++i){
+    goal.trajectory.points[0].positions[i] = joint_values[i];
+    goal.trajectory.points[0].velocities[i] = 0.0;
+    goal.trajectory.points[0].accelerations[i] = 0.0;
+  }
+  //catch reset linear.x = -1
+  if(twist_msg->linear.x<-0.5){
+    goal.trajectory.points[0].positions[0] = 0;
+    goal.trajectory.points[0].positions[1] = 0;
+    goal.trajectory.points[0].time_from_start = ros::Duration(2*command_goal_time_from_start_);
+  }
+
+  if ( !collision_result.collision or current_state_colliding ) {
+    gh_list_.push_back( joint_traj_client_->sendGoal(
+        goal, boost::bind( &CamJointTrajControl::transitionCb, this, _1 ) ) );
+  }
 }
 
 }
