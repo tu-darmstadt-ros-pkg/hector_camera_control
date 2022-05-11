@@ -97,10 +97,10 @@ void CamJointTrajControl::Init()
 
   lookat_frame_ = std::string("sensor_head_mount_link");
   pnh_.getParam("lookat_reference_frame", lookat_frame_);
-  
+
   command_goal_time_from_start_ = 0.3;
   pnh_.getParam("command_goal_time_from_start", command_goal_time_from_start_);
-  
+
   max_axis_speed_ = 0.0;
   pnh_.getParam("max_axis_speed", max_axis_speed_);
 
@@ -151,11 +151,11 @@ void CamJointTrajControl::Init()
   }
 
   control_timer = nh_.createTimer(ros::Duration(control_loop_period_), &CamJointTrajControl::controlTimerCallback, this, false, true);
-  
+
   pnh_.getParam("disable_orientation_camera_command_input", disable_orientation_camera_command_input_);
-  
+
   if (!disable_orientation_camera_command_input_){
-    sub_ = nh_.subscribe("/camera/command", 1, &CamJointTrajControl::cmdCallback, this);    
+    sub_ = nh_.subscribe("/camera/command", 1, &CamJointTrajControl::cmdCallback, this);
   }
   sub_camera_twist_ = nh_.subscribe("/camera/command_twist", 1, &CamJointTrajControl::cameraTwistCallback, this);
 
@@ -458,9 +458,9 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
   //std::cout << "\nangles:"  << " pitch_diff: " <<  error_pitch << " yaw diff:" << error_yaw << "\n";
 
   if (!use_direct_position_commands_){
-      
+
     control_msgs::FollowJointTrajectoryGoal goal;
-      
+
     goal.goal_time_tolerance = ros::Duration(1.0);
     //goal.goal.path_tolerance = 1.0;
     //goal.goal.trajectory.joint_names
@@ -482,20 +482,20 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
 
     if (max_axis_speed_ != 0.0){
       double max_diff = 0.0;
-      
+
       if (num_joints == 1){
         max_diff = std::abs(diff_1);
       }else{
-        max_diff = std::max(std::abs(diff_1), std::abs(diff_2));  
+        max_diff = std::max(std::abs(diff_1), std::abs(diff_2));
       }
-    
+
       double target_time = max_diff / max_axis_speed_;
-      
+
       target_time = std::max (target_time, command_goal_time_from_start_);
-      
+
       goal.trajectory.points[0].time_from_start = ros::Duration(target_time);
-      
-    }else{      
+
+    }else{
       goal.trajectory.points[0].time_from_start = ros::Duration(command_goal_time_from_start_);
     }
 
@@ -598,8 +598,8 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
       }
 
       new_goal_received_ = false;
-      
-      
+
+
       if (use_planning_based_pointing_){
 
         ros::Rate rate (10);
@@ -636,7 +636,7 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
 
       if ((gh_list_.size() == 0) && (now > pattern_switch_time_)){
         ROS_INFO("Planning to next target point with index %d", (int) pattern_index_);
-          
+
 
         const std::vector<TargetPointPatternElement>& curr_pattern = patterns_.at(current_pattern_name_);
         const TargetPointPatternElement& curr_target = curr_pattern[pattern_index_];
@@ -663,7 +663,7 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
           this->ComputeAndSendJointCommand(command_quat);
         }
 
-        
+
         return;
 
       }else{
@@ -715,7 +715,7 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
 }
 
 void CamJointTrajControl::transitionCb(actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> gh)
-{  
+{
 
   std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> >::iterator it = gh_list_.begin();
 
@@ -767,7 +767,7 @@ void CamJointTrajControl::transitionCb(actionlib::ClientGoalHandle<control_msgs:
       it = gh_list_.erase(it);
     }else{
       ++it;
-    }    
+    }
   }
 
   // If we're done and have not requested continuous replanning, set succeeded.
@@ -787,7 +787,7 @@ void CamJointTrajControl::transitionCb(actionlib::ClientGoalHandle<control_msgs:
     pattern_index_ = (pattern_index_ + 1) % curr_pattern.size();
     pattern_switch_time_ = ros::Time::now() + curr_pattern[pattern_index_].stay_time;
   }
-    
+
 
   // If there are no goal handles left after we erased the ones that are DONE,
   // this means our last sent one got preempted by the server as someone else
@@ -873,7 +873,7 @@ void CamJointTrajControl::lookAtPreemptCallback()
 void CamJointTrajControl::trajActionStatusCallback(const actionlib_msgs::GoalStatusArrayConstPtr& msg)
 {
   ROS_DEBUG("Action status callback");
-  
+
   if (control_mode_ == MODE_PATTERN){
     for (size_t i = 0; i < msg->status_list.size(); ++i){
 
