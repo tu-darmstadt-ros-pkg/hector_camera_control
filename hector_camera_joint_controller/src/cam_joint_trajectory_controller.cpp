@@ -524,6 +524,11 @@ void CamJointTrajControl::cmdCallback(const geometry_msgs::QuaternionStamped::Co
     ROS_INFO("[cam joint ctrl] Preempted running goal by orientation command.");
   }
 
+  if (look_at_server_->isActive() ){
+    ROS_INFO_STREAM("[cam joint ctrl] Lookat action goal was active, preempting");
+    look_at_server_->setPreempted();
+  }
+
   latest_orientation_cmd_ = cmd_msg;
   control_mode_ = MODE_ORIENTATION;
 }
@@ -664,6 +669,9 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
     if (control_mode_ == MODE_ORIENTATION){
       if (latest_orientation_cmd_.get()){
         this->ComputeAndSendJointCommand(*latest_orientation_cmd_);
+        latest_orientation_cmd_.reset();
+        joint_trajectory_preempted_ = false;
+        control_mode_ = MODE_OFF;
       }
     }
   }
