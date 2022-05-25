@@ -65,6 +65,37 @@ struct TargetPointPatternElement{
 };
 
 
+
+class TrackedJoint{
+public:
+  TrackedJoint(const std::string& joint_name,
+               const std::string& topic,
+               const double lower_limit,
+               const double upper_limit,
+               ros::NodeHandle& nh);
+  void updateState(const sensor_msgs::JointState& msg);
+
+  void setTarget(const double position);
+  bool reachedTarget();
+
+  sensor_msgs::JointState state_;
+
+  double desired_pos_;
+
+  ros::Publisher joint_target_pub_;
+};
+
+class TrackedJointManager{
+public:
+  void addJoint(const TrackedJoint& joint);
+  void updateState(const sensor_msgs::JointState& msg);
+  bool reachedTarget();
+
+  TrackedJoint& getJoint(size_t index) { return tracked_joints_[index]; };
+
+  std::vector<TrackedJoint> tracked_joints_;
+};
+
 class CamJointTrajControl
 {
 
@@ -78,6 +109,7 @@ protected:
 
   void directPointingTimerCallback(const ros::TimerEvent& event);
   void controlTimerCallback(const ros::TimerEvent& event);
+  void jointStatesCallback(const sensor_msgs::JointState& msg);
 
 private:
   void getJointNamesFromMoveGroup();
@@ -85,6 +117,8 @@ private:
 
   bool planAndMoveToPoint(const geometry_msgs::PointStamped& point, double velocity_scaling_factor = 1.0);
   bool ComputeDirectionForPoint(const geometry_msgs::PointStamped& lookat_point, geometry_msgs::QuaternionStamped& orientation);
+  bool ComputeHeightForPoint(const geometry_msgs::PointStamped& lookat_point, double& height);
+
   void ComputeAndSendJointCommand(const geometry_msgs::QuaternionStamped& command_to_use);
 
   void transitionCb(actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> gh);
@@ -101,6 +135,10 @@ private:
   bool findPattern(const std::string& pattern_name);
 
   void cmdCallback(const geometry_msgs::QuaternionStamped::ConstPtr& cmd_msg);
+
+  double getClosestPointLineSegment(const Eigen::Vector3d& head,
+                                    const Eigen::Vector3d& tail,
+                                    const Eigen::Vector3d& point);
 
   unsigned int rotationConv;
 
@@ -142,6 +180,8 @@ private:
   robot_state::RobotStatePtr moveit_robot_state_;
   std::vector<std::string> joint_names_;
 
+  TrackedJointManager joint_manager_;
+
   geometry_msgs::QuaternionStamped::ConstPtr latest_orientation_cmd_;
   Eigen::Quaterniond rotation_;
 
@@ -155,8 +195,8 @@ private:
   ros::Time last_plan_time_;
   bool new_goal_received_;
 
-  ros::Publisher servo_pub_1_;
-  ros::Publisher servo_pub_2_;
+  //ros::Publisher servo_pub_1_;
+  //ros::Publisher servo_pub_2_;
   ros::Timer reached_lookat_target_timer_;
 
   std::map<std::string, std::vector<TargetPointPatternElement> > patterns_;
@@ -171,6 +211,8 @@ private:
 
   bool use_direct_position_commands_;
   double direct_position_command_default_wait_time_;
+
+  bool has_elevating_mast_;
   
   bool use_planning_based_pointing_;
   bool disable_orientation_camera_command_input_;

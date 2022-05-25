@@ -35,10 +35,93 @@
 
 #include <moveit_msgs/GetMotionPlan.h>
 
+#include <tf_conversions/tf_eigen.h>
+
 #include <hector_perception_msgs/CameraPatternInfo.h>
 #include <control_msgs/QueryTrajectoryState.h>
 
 namespace cam_control {
+
+TrackedJoint::TrackedJoint(const std::string& joint_name,
+             const std::string& topic,
+             const double lower_limit,
+             const double upper_limit,
+             ros::NodeHandle& nh)
+{
+  this->state_.name.resize(1);
+  this->state_.position.resize(1);
+  this->state_.velocity.resize(1);
+  this->state_.effort.resize(1);
+
+  joint_target_pub_ = nh.advertise<std_msgs::Float64>(topic,1,false);
+}
+
+void TrackedJoint::updateState(const sensor_msgs::JointState& msg)
+{
+  for (size_t i = 0; i < msg.name.size(); ++i)
+  {
+    if (msg.name[i] == this->state_.name[0]){
+      this->state_.header = msg.header;
+      this->state_.position[0] = msg.position[i];
+      this->state_.velocity[0] = msg.velocity[i];
+      this->state_.effort[0]   = msg.effort[i];
+      return;
+    }
+  }
+}
+
+void TrackedJoint::setTarget(const double position)
+{
+  this->desired_pos_ = position;
+
+  std_msgs::Float64 msg;
+  msg.data = this->desired_pos_;
+  joint_target_pub_.publish(msg);
+}
+
+bool TrackedJoint::reachedTarget()
+{
+  double time_diff = (ros::Time::now() - this->state_.header.stamp).toSec();
+  if ( std::abs(time_diff) > 2.0){
+    ROS_WARN_STREAM_THROTTLE(5.0, "Joint state information time diff " << time_diff << ", unable to check if reached target");
+    return false;
+  }
+
+  if (std::abs(this->state_.position[0] - this->desired_pos_) < 0.05)
+  {
+    return true;
+  }
+  return false;
+}
+
+void TrackedJointManager::addJoint(const TrackedJoint& joint)
+{
+  tracked_joints_.push_back(joint);
+}
+
+
+void TrackedJointManager::updateState(const sensor_msgs::JointState& msg)
+{
+  for (size_t i = 0; i < tracked_joints_.size(); ++i)
+  {
+    tracked_joints_[i].updateState(msg);
+  }
+}
+
+bool TrackedJointManager::reachedTarget()
+{
+
+  for (size_t i = 0; i < tracked_joints_.size(); ++i)
+  {
+    if (!tracked_joints_[i].reachedTarget())
+    {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 
 enum
 {
@@ -123,8 +206,11 @@ void CamJointTrajControl::Init()
     pitch_axis_factor_ = -1.0;
   }
 
+  has_elevating_mast_ = false;
+  pnh_.getParam("has_elevating_mast", has_elevating_mast_);
 
   pnh_.getParam("use_direct_position_commands", use_direct_position_commands_);
+  use_direct_position_commands_ = true;
   direct_position_command_default_wait_time_ = 4.0;
   pnh_.getParam("direct_position_command_default_wait_time", direct_position_command_default_wait_time_);
   
@@ -146,8 +232,22 @@ void CamJointTrajControl::Init()
   controller_nh_ = ros::NodeHandle(controller_namespace_);
 
   if (use_direct_position_commands_){
-    servo_pub_1_ = nh_.advertise<std_msgs::Float64>("servo1_command", 1);
-    servo_pub_2_ = nh_.advertise<std_msgs::Float64>("servo2_command", 1);
+    //servo_pub_1_ = nh_.advertise<std_msgs::Float64>("servo1_command", 1);
+    //servo_pub_2_ = nh_.advertise<std_msgs::Float64>("servo2_command", 1);
+
+    joint_manager_.addJoint(TrackedJoint("mast_rotation_joint",
+                                         "/bla/set",
+                                         -M_PI,
+                                         M_PI,
+                                         nh_));
+
+    if (has_elevating_mast_){
+      joint_manager_.addJoint(TrackedJoint("mast_prismatic_joint",
+                                           "/position_controller/command",
+                                           0.0,
+                                           0.83,
+                                           nh_));
+    }
 
   }else{
     // Actions, subscribers
@@ -511,9 +611,73 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
 
     gh_list_.push_back(joint_traj_client_->sendGoal(goal, boost::bind(&CamJointTrajControl::transitionCb, this, _1)));
   }else{
-    servo_pub_1_.publish(desAngle[0]);
-    servo_pub_2_.publish(desAngle[1]);
+    joint_manager_.getJoint(0).setTarget(desAngle[0]);
+    //joint_manager_.getJoint(1).setTarget(desAngle[1]);
+    //servo_pub_1_.publish(desAngle[0]);
+    //servo_pub_2_.publish(desAngle[1]);
   }
+}
+
+bool CamJointTrajControl::ComputeHeightForPoint(const geometry_msgs::PointStamped& lookat_point, double& height)
+{
+  geometry_msgs::PointStamped lookat_camera;
+
+  tf::StampedTransform base_camera_transform;
+
+  try {
+    transform_listener_->waitForTransform(robot_link_reference_frame_, lookat_point.header.frame_id, ros::Time(), ros::Duration(1.0));
+    transform_listener_->transformPoint(robot_link_reference_frame_, ros::Time(), lookat_point, lookat_point.header.frame_id, lookat_camera);
+  } catch (std::runtime_error& e) {
+    ROS_WARN("Could not transform look_at position to target frame_id %s", e.what());
+    return false;
+  }
+
+  try {
+    transform_listener_->waitForTransform(robot_link_reference_frame_, "mast_link", ros::Time(), ros::Duration(1.0));
+    transform_listener_->lookupTransform(robot_link_reference_frame_, "mast_link", ros::Time(), base_camera_transform);
+  } catch (std::runtime_error& e) {
+    ROS_WARN("Could not transform from base frame to camera_frame %s", e.what());
+    return false;
+  }
+
+
+  Eigen::Isometry3d mast_to_ref_transform_eigen;
+  tf::transformTFToEigen(base_camera_transform, mast_to_ref_transform_eigen);
+
+  Eigen::Vector3d start_vec = mast_to_ref_transform_eigen.translation();
+
+  std::cout << "s:\n" << start_vec << "\n";
+
+  double joint_limit_upper = 0.84;
+
+  Eigen::Vector3d end_vec = mast_to_ref_transform_eigen * Eigen::Vector3d(0.0, 0.0, joint_limit_upper);
+  std::cout << "e:\n" << end_vec << "\n";
+
+  Eigen::Vector3d ref_point(lookat_camera.point.x, lookat_camera.point.y, lookat_camera.point.z);
+
+  double factor = this->getClosestPointLineSegment(start_vec, end_vec, ref_point);
+
+  double primatic_joint_val = factor * joint_limit_upper;
+
+  std::cout << "joint val: " << primatic_joint_val << "\n";
+
+  return true;
+
+  //tf::Vector3
+
+
+//      base_camera_transform.getOrigin();
+//      base_camera_transform.
+
+  /*
+  orientation.header = lookat_camera.header;
+  orientation.header.frame_id = robot_link_reference_frame_;
+  tf::Vector3 dir(lookat_camera.point.x - base_camera_transform.getOrigin().x(), lookat_camera.point.y - base_camera_transform.getOrigin().y(), lookat_camera.point.z - base_camera_transform.getOrigin().z());
+  tf::Quaternion quaternion = tf::createQuaternionFromRPY(0.0, -atan2(dir.z(), sqrt(dir.x()*dir.x() + dir.y()*dir.y())), atan2(dir.y(), dir.x()));
+
+  //if (last_orientation.length2() == 0.0 || quaternion.angle(last_orientation) >= update_min_angle) {
+  tf::quaternionTFToMsg(quaternion, orientation.quaternion);
+  */
 }
 
 // NEW: Store the velocities from the ROS message
@@ -552,6 +716,19 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
             }
             it++;
           }
+        }else if (lookat_oneshot_ && use_direct_position_commands_) {
+          
+          if (joint_manager_.reachedTarget()){
+            
+            if (look_at_server_->isActive()){
+              control_mode_ = MODE_OFF;
+              look_at_server_->setSucceeded();
+            }
+          }
+
+          return;
+
+        
         }else{
           if (use_planning_based_pointing_ &&
               ((ros::Time::now() - last_plan_time_).toSec() < 0.8))
@@ -591,6 +768,15 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
         {
           this->ComputeAndSendJointCommand(command_quat);
         }
+
+        if (has_elevating_mast_){
+          double prismatic_desired;
+          this->ComputeHeightForPoint(this->lookat_point_, prismatic_desired);
+
+          joint_manager_.getJoint(1).setTarget(prismatic_desired);
+        }
+        
+        
         return;
       }
 
@@ -675,6 +861,11 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
       }
     }
   }
+}
+
+void CamJointTrajControl::jointStatesCallback(const sensor_msgs::JointState& msg)
+{
+  this->joint_manager_.updateState(msg);
 }
 
 void CamJointTrajControl::directPointingTimerCallback(const ros::TimerEvent& event)
@@ -805,7 +996,6 @@ void CamJointTrajControl::lookAtGoalCallback()
 
   if (!goal->look_at_target.pattern.empty()){
 
-
     if (findPattern(goal->look_at_target.pattern)){
       ROS_INFO("Starting pattern %s", goal->look_at_target.pattern.c_str());
 
@@ -827,12 +1017,14 @@ void CamJointTrajControl::lookAtGoalCallback()
     ROS_INFO("Starting LookAt Action with: no_continuous_tracking: %d", goal->look_at_target.no_continuous_tracking);
 
     if (use_direct_position_commands_){
+      /*
       reached_lookat_target_timer_ = nh_.createTimer(
             ros::Duration(direct_position_command_default_wait_time_),
             &CamJointTrajControl::directPointingTimerCallback,
             this,
             true,
             true);
+            */
 
     }
 
@@ -961,6 +1153,26 @@ bool CamJointTrajControl::findPattern(const std::string& pattern_name)
 
   ROS_ERROR("Pattern %s not found in %s!", pattern_name.c_str(), patterns_param_.c_str());
   return false;
+}
+
+double CamJointTrajControl::getClosestPointLineSegment(const Eigen::Vector3d& head,
+                                  const Eigen::Vector3d& tail,
+                                  const Eigen::Vector3d& point)
+{
+    double l2 = std::pow((head - tail).norm(),2);
+    //if(l2 ==0.0) return (head - point).norm();// head == tail case
+
+    // Consider the line extending the segment, parameterized as head + t (tail - point).
+    // We find projection of point onto the line.
+    // It falls where t = [(point-head) . (tail-head)] / |tail-head|^2
+    // We clamp t from [0,1] to handle points outside the segment head--->tail.
+
+    double t = std::max(0.0, std::min(1.0,(point-head).dot(tail-head)/l2));
+    Eigen::Vector3d projection = head + t*(tail-head);
+    std::cout << "proj\n" << projection << "\n";
+
+    //return (point - projection).norm();
+    return t;
 }
 
 }

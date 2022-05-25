@@ -12,6 +12,7 @@ find_package(catkin REQUIRED COMPONENTS
   hector_perception_msgs
   moveit_core
   moveit_ros_planning
+  tf_conversions
 )
 
 find_package(Eigen3 REQUIRED)
