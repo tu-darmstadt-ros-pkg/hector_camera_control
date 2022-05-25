@@ -53,6 +53,8 @@ TrackedJoint::TrackedJoint(const std::string& joint_name,
   this->state_.velocity.resize(1);
   this->state_.effort.resize(1);
 
+  this->state_.name[0] = joint_name;
+
   joint_target_pub_ = nh.advertise<std_msgs::Float64>(topic,1,false);
 }
 
@@ -83,11 +85,14 @@ bool TrackedJoint::reachedTarget()
 {
   double time_diff = (ros::Time::now() - this->state_.header.stamp).toSec();
   if ( std::abs(time_diff) > 2.0){
-    ROS_WARN_STREAM_THROTTLE(5.0, "Joint state information time diff " << time_diff << ", unable to check if reached target");
+    ROS_WARN_STREAM_THROTTLE(5.0, "Joint " << this->state_.name[0] << " time diff " << time_diff << ", unable to check if reached target, assuming not. Throttled.");
     return false;
   }
 
-  if (std::abs(this->state_.position[0] - this->desired_pos_) < 0.05)
+  double diff_abs = std::abs(this->state_.position[0] - this->desired_pos_);
+  ROS_DEBUG_STREAM("Joint diff_abs: " << diff_abs);
+
+  if (diff_abs < 0.05)
   {
     return true;
   }
@@ -234,6 +239,8 @@ void CamJointTrajControl::Init()
   if (use_direct_position_commands_){
     //servo_pub_1_ = nh_.advertise<std_msgs::Float64>("servo1_command", 1);
     //servo_pub_2_ = nh_.advertise<std_msgs::Float64>("servo2_command", 1);
+
+    joint_state_sub_ = nh_.subscribe("joint_states", 1, &CamJointTrajControl::jointStatesCallback, this);
 
     joint_manager_.addJoint(TrackedJoint("mast_rotation_joint",
                                          "/mast_pan_control/pan_servo_position_controller/command",

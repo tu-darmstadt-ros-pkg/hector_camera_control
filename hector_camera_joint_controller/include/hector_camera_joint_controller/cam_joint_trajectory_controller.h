@@ -168,6 +168,7 @@ private:
 
   ros::Timer control_timer;
 
+  ros::Subscriber joint_state_sub_;
   ros::Subscriber sub_;
   tf::TransformListener* transform_listener_;
 
