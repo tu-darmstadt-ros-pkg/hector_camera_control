@@ -236,7 +236,7 @@ void CamJointTrajControl::Init()
     //servo_pub_2_ = nh_.advertise<std_msgs::Float64>("servo2_command", 1);
 
     joint_manager_.addJoint(TrackedJoint("mast_rotation_joint",
-                                         "/bla/set",
+                                         "/mast_pan_control/pan_servo_position_controller/command",
                                          -M_PI,
                                          M_PI,
                                          nh_));
