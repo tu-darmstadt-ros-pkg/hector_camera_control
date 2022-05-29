@@ -46,6 +46,7 @@ TrackedJoint::TrackedJoint(const std::string& joint_name,
              const std::string& topic,
              const double lower_limit,
              const double upper_limit,
+             const double reached_threshold,
              ros::NodeHandle& nh)
 {
   this->state_.name.resize(1);
@@ -55,7 +56,13 @@ TrackedJoint::TrackedJoint(const std::string& joint_name,
 
   this->state_.name[0] = joint_name;
 
-  joint_target_pub_ = nh.advertise<std_msgs::Float64>(topic,1,false);
+  this->reached_threshold_ = reached_threshold;
+
+  ROS_INFO_STREAM("Added joint " << joint_name << " topic: " << topic <<
+                  " lowerl: " << lower_limit << " upperl: " << upper_limit <<
+                  " reached thresh: " << reached_threshold);
+
+  joint_target_pub_ = nh.advertise<std_msgs::Float64>("/" + topic,1,false);
 }
 
 void TrackedJoint::updateState(const sensor_msgs::JointState& msg)
@@ -92,11 +99,33 @@ bool TrackedJoint::reachedTarget()
   double diff_abs = std::abs(this->state_.position[0] - this->desired_pos_);
   ROS_DEBUG_STREAM("Joint diff_abs: " << diff_abs);
 
-  if (diff_abs < 0.05)
+  if (diff_abs < this->reached_threshold_)
   {
     return true;
   }
   return false;
+}
+
+void TrackedJointManager::addJoint(const std::string& ns, ros::NodeHandle& nh)
+{
+  std::string joint_name;
+  std::string topic;
+  double min_val;
+  double max_val;
+  double reached_threshold;
+  nh.getParam(ns + "/name", joint_name);
+  nh.getParam(ns +"/topic", topic);
+  nh.param(ns +"/limit_lower", min_val, -M_PI);
+  nh.param(ns +"/limit_upper", max_val, M_PI);
+  nh.param(ns +"/reached_threshold", reached_threshold, 0.05);
+
+  this->addJoint(TrackedJoint(joint_name,
+                              topic,
+                              min_val,
+                              max_val,
+                              reached_threshold,
+                              nh));
+
 }
 
 void TrackedJointManager::addJoint(const TrackedJoint& joint)
@@ -242,12 +271,16 @@ void CamJointTrajControl::Init()
 
     joint_state_sub_ = nh_.subscribe("joint_states", 1, &CamJointTrajControl::jointStatesCallback, this);
 
-    joint_manager_.addJoint(TrackedJoint("mast_rotation_joint",
-                                         "/mast_pan_control/pan_servo_position_controller/command",
-                                         -M_PI,
-                                         M_PI,
-                                         nh_));
+    if (pnh_.hasParam("joint0/name")){
+      joint_manager_.addJoint("joint0", pnh_);
+    }
 
+    if (pnh_.hasParam("joint1/name")){
+      joint_manager_.addJoint("joint1", pnh_);
+    }
+
+
+    /*
     if (has_elevating_mast_){
       joint_manager_.addJoint(TrackedJoint("mast_prismatic_joint",
                                            "/position_controller/command",
@@ -255,6 +288,7 @@ void CamJointTrajControl::Init()
                                            0.83,
                                            nh_));
     }
+    */
 
   }else{
     // Actions, subscribers
@@ -619,6 +653,11 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
     gh_list_.push_back(joint_traj_client_->sendGoal(goal, boost::bind(&CamJointTrajControl::transitionCb, this, _1)));
   }else{
     joint_manager_.getJoint(0).setTarget(desAngle[0]);
+
+    if ((joint_manager_.getNumJoints() > 1 ) && !this->has_elevating_mast_){
+      joint_manager_.getJoint(1).setTarget(desAngle[1]);
+    }
+
     //joint_manager_.getJoint(1).setTarget(desAngle[1]);
     //servo_pub_1_.publish(desAngle[0]);
     //servo_pub_2_.publish(desAngle[1]);
@@ -779,10 +818,8 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
         if (has_elevating_mast_){
           double prismatic_desired;
           this->ComputeHeightForPoint(this->lookat_point_, prismatic_desired);
-
           joint_manager_.getJoint(1).setTarget(prismatic_desired);
         }
-        
         
         return;
       }

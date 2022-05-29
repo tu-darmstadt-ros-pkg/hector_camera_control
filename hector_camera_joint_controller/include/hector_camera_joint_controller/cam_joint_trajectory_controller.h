@@ -72,6 +72,7 @@ public:
                const std::string& topic,
                const double lower_limit,
                const double upper_limit,
+               const double reached_threshold,
                ros::NodeHandle& nh);
   void updateState(const sensor_msgs::JointState& msg);
 
@@ -82,16 +83,20 @@ public:
 
   double desired_pos_;
 
+  double reached_threshold_;
+
   ros::Publisher joint_target_pub_;
 };
 
 class TrackedJointManager{
 public:
+  void addJoint(const std::string& ns, ros::NodeHandle& nh);
   void addJoint(const TrackedJoint& joint);
   void updateState(const sensor_msgs::JointState& msg);
   bool reachedTarget();
 
   TrackedJoint& getJoint(size_t index) { return tracked_joints_[index]; };
+  size_t getNumJoints() { return tracked_joints_.size(); };
 
   std::vector<TrackedJoint> tracked_joints_;
 };
