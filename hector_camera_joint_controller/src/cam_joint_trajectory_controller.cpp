@@ -703,9 +703,11 @@ bool CamJointTrajControl::ComputeHeightForPoint(const geometry_msgs::PointStampe
 
   double factor = this->getClosestPointLineSegment(start_vec, end_vec, ref_point);
 
-  double primatic_joint_val = factor * joint_limit_upper;
+  double prismatic_joint_val = factor * joint_limit_upper;
 
-  std::cout << "joint val: " << primatic_joint_val << "\n";
+  std::cout << "joint val: " << prismatic_joint_val << "\n";
+
+  height = prismatic_joint_val;
 
   return true;
 
