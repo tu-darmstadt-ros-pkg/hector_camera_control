@@ -506,9 +506,6 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
     }else {
       // Test if camera pose leads to self collisions -
       planning_scene::PlanningScene planning_scene( moveit_robot_model_ );
-      // ignore collision between these links, only padding collides and because of this camera cannot look upwards
-      planning_scene.getAllowedCollisionMatrixNonConst().setEntry( "sensor_head_thermal_cam_frame",
-                                                                   "chassis_link", true );
       moveit_msgs::GetPlanningScene srv;
       srv.request.components.components = srv.request.components.ROBOT_STATE;
       if ( this->get_planning_scene_.call( srv ) ) {
@@ -535,14 +532,14 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
         collision_result.clear();
         planning_scene.checkSelfCollision( collision_request, collision_result );
         if ( collision_result.collision )
-          ROS_INFO_STREAM( "Sensor won't move because of detected collision" );
+          ROS_DEBUG_STREAM( "Sensor won't move because of detected collision" );
         collision_detection::CollisionResult::ContactMap::const_iterator it;
         //for ( it = collision_result.contacts.begin(); it != collision_result.contacts.end(); ++it ) {
         //  ROS_INFO( "Contact between: %s and %s", it->first.first.c_str(), it->first.second.c_str() );
         //}
       }
       if ( !collision_result.collision or current_state_colliding ) {
-        ROS_INFO_STREAM( "Sensor head movement is valid" );
+        //ROS_INFO_STREAM( "Sensor head movement is valid" );
         gh_list_.push_back( joint_traj_client_->sendGoal(
             goal, boost::bind( &CamJointTrajControl::transitionCb, this, _1 ) ) );
       }
@@ -994,9 +991,6 @@ void CamJointTrajControl::cameraTwistCallback(const geometry_msgs::Twist::ConstP
   control_mode_ = MODE_ORIENTATION;
   //get current joint states
   planning_scene::PlanningScene planning_scene( moveit_robot_model_ );
-  // ignore collision between these links, only padding collides and because of this camera cannot look upwards
-  planning_scene.getAllowedCollisionMatrixNonConst().setEntry( "sensor_head_thermal_cam_frame",
-                                                               "chassis_link", true );
   moveit_msgs::GetPlanningScene srv;
   srv.request.components.components = srv.request.components.ROBOT_STATE;
   if ( this->get_planning_scene_.call( srv ) ) {
@@ -1028,7 +1022,7 @@ void CamJointTrajControl::cameraTwistCallback(const geometry_msgs::Twist::ConstP
     collision_result.clear();
     planning_scene.checkSelfCollision( collision_request, collision_result );
     if ( collision_result.collision )
-      ROS_INFO_STREAM( "Sensor won't move because of detected collision" );
+      ROS_DEBUG_STREAM( "Sensor won't move because of detected collision" );
     collision_detection::CollisionResult::ContactMap::const_iterator it;
     //for ( it = collision_result.contacts.begin(); it != collision_result.contacts.end(); ++it ) {
     //  ROS_INFO( "Contact between: %s and %s", it->first.first.c_str(), it->first.second.c_str() );
