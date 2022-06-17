@@ -532,6 +532,16 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
 
   rotation_ = quat * rotation_;
 
+  /*
+  tf::Quaternion quat_tf;
+  tf::quaternionMsgToTF(last_odom_->pose.pose.orientation, quat_tf);
+  tf::Matrix3x3 rotation(quat_tf) ;
+  double roll, pitch, yaw;
+  rotation.getRPY(roll, pitch, yaw);
+  */
+  Eigen::Vector3d rpy = Eigen::Matrix3d(rotation_).eulerAngles(0, 1, 2);
+  std::cout << " rpy " << rpy << "\n";
+
   double temp[5];
 
   switch(rotationConv)  {
@@ -560,6 +570,8 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
     atan2(temp[0], temp[1]),
     asin(temp[2]),
     atan2(temp[3], temp[4]));
+
+  std::cout << " old " << desAngle << "\n";
 
   tf::StampedTransform current_state_transform;
   try{
@@ -733,7 +745,7 @@ void CamJointTrajControl::cmdCallback(const geometry_msgs::QuaternionStamped::Co
 {
   if (!joint_trajectory_preempted_){
     joint_trajectory_preempted_ = true;
-    ROS_INFO("[cam joint ctrl] Preempted running goal by orientation command.");
+    ROS_DEBUG("[cam joint ctrl] Preempted running goal by orientation command.");
   }
 
   if (look_at_server_->isActive() ){
