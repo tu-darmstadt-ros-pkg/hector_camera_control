@@ -733,7 +733,7 @@ void CamJointTrajControl::cmdCallback(const geometry_msgs::QuaternionStamped::Co
 {
   if (!joint_trajectory_preempted_){
     joint_trajectory_preempted_ = true;
-    ROS_INFO("[cam joint ctrl] Preempted running goal by orientation command.");
+    ROS_DEBUG("[cam joint ctrl] Preempted running goal by orientation command.");
   }
 
   if (look_at_server_->isActive() ){
