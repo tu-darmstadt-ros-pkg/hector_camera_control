@@ -74,6 +74,8 @@ void TrackedJoint::updateState(const sensor_msgs::JointState& msg)
       this->state_.position[0] = msg.position[i];
       //this->state_.velocity[0] = msg.velocity[i];
       //this->state_.effort[0]   = msg.effort[i];
+
+      this->position_lp_filtered_ = msg.position[i] * 0.05 + this->position_lp_filtered_ * 0.95;
       return;
     }
   }

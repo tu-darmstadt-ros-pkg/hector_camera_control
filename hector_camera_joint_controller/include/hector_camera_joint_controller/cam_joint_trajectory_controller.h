@@ -78,10 +78,14 @@ public:
 
   void setTarget(const double position);
   bool reachedTarget();
+  bool reachedSteadyState();
 
   sensor_msgs::JointState state_;
 
+  // position low pass filtered, used for steady state detection
+  double position_lp_filtered_;
   double desired_pos_;
+  ros::Time desired_pos_stamp_;
 
   double reached_threshold_;
 
@@ -94,6 +98,7 @@ public:
   void addJoint(const TrackedJoint& joint);
   void updateState(const sensor_msgs::JointState& msg);
   bool reachedTarget();
+  bool reachedSteadyState();
 
   TrackedJoint& getJoint(size_t index) { return tracked_joints_[index]; };
   size_t getNumJoints() { return tracked_joints_.size(); };
