@@ -56,6 +56,8 @@ TrackedJoint::TrackedJoint(const std::string& joint_name,
 
   this->state_.name[0] = joint_name;
 
+  this->position_lp_filtered_ = 0.0;
+
   this->reached_threshold_ = reached_threshold;
 
   ROS_INFO_STREAM("Added joint " << joint_name << " topic: " << topic <<
@@ -84,6 +86,7 @@ void TrackedJoint::updateState(const sensor_msgs::JointState& msg)
 void TrackedJoint::setTarget(const double position)
 {
   this->desired_pos_ = position;
+  desired_pos_stamp_ = ros::Time::now();
 
   std_msgs::Float64 msg;
   msg.data = this->desired_pos_;
@@ -106,6 +109,21 @@ bool TrackedJoint::reachedTarget()
     return true;
   }
   return false;
+}
+
+bool TrackedJoint::reachedSteadyState()
+{
+  double time_since_desired_received = (ros::Time::now() - desired_pos_stamp_).toSec();
+
+  if (time_since_desired_received > 10.0)
+  {
+    if (std::abs(this->state_.position[0] - this->position_lp_filtered_) < this->reached_threshold_)
+    {
+      return true;
+    }
+  } 
+
+  return false; 
 }
 
 void TrackedJointManager::addJoint(const std::string& ns, ros::NodeHandle& nh)
@@ -150,6 +168,20 @@ bool TrackedJointManager::reachedTarget()
   for (size_t i = 0; i < tracked_joints_.size(); ++i)
   {
     if (!tracked_joints_[i].reachedTarget())
+    {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool TrackedJointManager::reachedSteadyState()
+{
+
+  for (size_t i = 0; i < tracked_joints_.size(); ++i)
+  {
+    if (!tracked_joints_[i].reachedSteadyState())
     {
       return false;
     }
@@ -774,7 +806,14 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
               control_mode_ = MODE_OFF;
               look_at_server_->setSucceeded();
             }
+          }else if (joint_manager_.reachedSteadyState()){
+
+            if (look_at_server_->isActive()){
+              control_mode_ = MODE_OFF;
+              look_at_server_->setAborted();
+            }
           }
+          
 
           return;
 
