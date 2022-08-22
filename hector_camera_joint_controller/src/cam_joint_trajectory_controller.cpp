@@ -236,6 +236,7 @@ void CamJointTrajControl::Init()
   nh_ = ros::NodeHandle("");
 
   pattern_info_pub_ = pnh_.advertise<hector_perception_msgs::CameraPatternInfo>("/available_camera_patterns",2, true);
+  goal_point_pub_   = pnh_.advertise<geometry_msgs::PointStamped>("goal_point",1 , false);
 
   pnh_.param<std::string>("move_group", move_group_name_, "sensor_head_group");
 
@@ -530,6 +531,10 @@ bool CamJointTrajControl::ComputeDirectionForPoint(const geometry_msgs::PointSta
   } catch (std::runtime_error& e) {
     ROS_WARN("Could not transform from base frame to camera_frame %s", e.what());
     return false;
+  }
+
+  if (goal_point_pub_.getNumSubscribers() > 0){
+    goal_point_pub_.publish(lookat_camera);
   }
 
   orientation.header = lookat_camera.header;

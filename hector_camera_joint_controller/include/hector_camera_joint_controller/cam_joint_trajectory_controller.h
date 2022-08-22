@@ -183,6 +183,7 @@ private:
   tf::TransformListener* transform_listener_;
 
   ros::Publisher pattern_info_pub_;
+  ros::Publisher goal_point_pub_;
 
   ros::ServiceClient get_plan_service_client_;
 
