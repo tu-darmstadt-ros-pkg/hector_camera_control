@@ -37,6 +37,12 @@
 
 #include <tf_conversions/tf_eigen.h>
 
+#include <ceres/ceres.h>
+#include <kdl/chain.hpp>
+#include <kdl_parser/kdl_parser.hpp>
+#include <kdl/jntarray.hpp>
+#include <kdl/chainfksolverpos_recursive.hpp>
+
 #include <hector_perception_msgs/CameraPatternInfo.h>
 #include <control_msgs/QueryTrajectoryState.h>
 
@@ -97,7 +103,7 @@ bool TrackedJoint::reachedTarget()
   }
 
   double diff_abs = std::abs(this->state_.position[0] - this->desired_pos_);
-  ROS_DEBUG_STREAM("Joint diff_abs: " << diff_abs);
+  ROS_INFO_STREAM("Joint diff_abs: " << diff_abs);
 
   if (diff_abs < this->reached_threshold_)
   {
@@ -156,6 +162,37 @@ bool TrackedJointManager::reachedTarget()
   return true;
 }
 
+struct CostFunctor
+{
+  // Constructor
+  CostFunctor(const KDL::Chain& chain, const KDL::Vector& poi_position) : poi_position_(poi_position), chain_(chain)
+  {
+  }
+
+  bool operator()(const double* const x, double* residual) const
+  {
+    // Compute forward kinematics
+    KDL::ChainFkSolverPos_recursive fk_solver(chain_);
+    KDL::JntArray joint_positions(chain_.getNrOfJoints());
+    for (size_t i = 0; i < chain_.getNrOfJoints(); ++i)
+      joint_positions(i) = x[i];
+
+    KDL::Frame current_pose;
+    fk_solver.JntToCart(joint_positions, current_pose);
+
+    KDL::Vector a = poi_position_ - current_pose.p;
+    KDL::Vector b = current_pose.M.UnitX(); // Assumes we want to point with x axis towards POI
+
+    // Minimize over joint angle between camera optical axis (b) and a = p - x (direction towards POI from camera center)
+    residual[0] = acos(KDL::dot(a, b) / (a.Norm() + b.Norm()));
+
+    return true;
+  }
+
+private:
+  KDL::Chain chain_;  // Forward kinematics chain
+  KDL::Vector poi_position_;
+};
 
 enum
 {
@@ -257,6 +294,10 @@ void CamJointTrajControl::Init()
     rotationConv = zyx;
   }
 
+  if (!kdl_parser::treeFromParam("/robot_description", tree_))
+  {
+    ROS_ERROR("robot_description could not be loaded: Sensor aiming might not work!");
+  }
 
   this->loadPatterns();
 
@@ -816,11 +857,8 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
           this->stopControllerTrajExecution();
         }
       }else{
-        geometry_msgs::QuaternionStamped command_quat;
-        if (this->ComputeDirectionForPoint(this->lookat_point_, command_quat))
-        {
-          this->ComputeAndSendJointCommand(command_quat);
-        }
+
+        this->aimAtPOI(this->lookat_point_);
 
         if (has_elevating_mast_){
           double prismatic_desired;
@@ -912,6 +950,69 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
       }
     }
   }
+}
+
+bool CamJointTrajControl::aimAtPOI(const geometry_msgs::PointStamped& poi_position){
+
+  // The variable to solve for with its initial value.
+  double desired_angles[2] = {0.0, 0.0};
+
+  KDL::Chain chain;
+  if (!tree_.getChain(robot_link_reference_frame_, aim_frame_, chain)){
+    ROS_WARN("Could not find link %s required for aiming at the POI", aim_frame_.c_str());
+    return false;
+  }
+
+  // POI to look at in the robots reference link
+  geometry_msgs::PointStamped poi_in_reference_frame;
+
+  try {
+    transform_listener_->waitForTransform(robot_link_reference_frame_, poi_position.header.frame_id, ros::Time(), ros::Duration(1.0));
+    transform_listener_->transformPoint(robot_link_reference_frame_, ros::Time(), poi_position, poi_position.header.frame_id, poi_in_reference_frame);
+  } catch (std::runtime_error& e) {
+    ROS_WARN("Could not transform look_at position to target frame_id %s", e.what());
+    return false;
+  }
+
+  if (goal_point_pub_.getNumSubscribers() > 0){
+    goal_point_pub_.publish(poi_in_reference_frame);
+  }
+
+  KDL::Vector poi(poi_in_reference_frame.point.x, poi_in_reference_frame.point.y, poi_in_reference_frame.point.z);
+
+  // Build the problem.
+  ceres::Problem problem;
+
+  ceres::CostFunction* cost_function =
+  new ceres::NumericDiffCostFunction<CostFunctor, ceres::CENTRAL, 1, 2>(
+      new CostFunctor(chain, poi));
+  problem.AddResidualBlock(cost_function, nullptr, desired_angles);
+
+  // Run the solver!
+  ceres::Solver::Options options;
+  options.linear_solver_type = ceres::DENSE_QR;
+  options.function_tolerance = 1e-8;
+  options.gradient_tolerance = 1e-8;
+  options.parameter_tolerance = 1e-8;
+
+  ceres::Solver::Summary summary;
+  ceres::Solve(options, &problem, &summary);
+
+  ROS_INFO("Computing aiming direction took: %fs", summary.total_time_in_seconds);
+  ROS_INFO_STREAM(summary.BriefReport());
+
+  std::cout << "Computed joint states: ";
+  for (size_t i = 0; i < 2; ++i)
+    std::cout << desired_angles[i] << " ";
+  std::cout << "\n";
+
+  joint_manager_.getJoint(0).setTarget(desired_angles[0]);
+
+  if ((joint_manager_.getNumJoints() > 1 ) && !this->has_elevating_mast_){
+    joint_manager_.getJoint(1).setTarget(desired_angles[1]);
+  }
+
+  return true;
 }
 
 void CamJointTrajControl::jointStatesCallback(const sensor_msgs::JointState& msg)
@@ -1044,6 +1145,7 @@ void CamJointTrajControl::lookAtGoalCallback()
 {
   actionlib::SimpleActionServer<hector_perception_msgs::LookAtAction>::GoalConstPtr goal = look_at_server_->acceptNewGoal();
   joint_trajectory_preempted_ = false;
+  aim_frame_ = goal->look_at_target.aim_frame;
 
   if (!goal->look_at_target.pattern.empty()){
 

@@ -13,9 +13,12 @@ find_package(catkin REQUIRED COMPONENTS
   moveit_core
   moveit_ros_planning
   tf_conversions
+  kdl_parser
 )
 
 find_package(Eigen3 REQUIRED)
+find_package(orocos_kdl REQUIRED)
+find_package(Ceres)
 include_directories(${EIGEN_INCLUDE_DIRS} include)
 add_definitions(${EIGEN_DEFINITIONS})
 
@@ -36,7 +39,7 @@ include_directories(
 add_executable(cam_joint_trajectory_controller src/cam_joint_trajectory_controller.cpp)
 
 target_link_libraries(cam_joint_trajectory_controller
-  ${catkin_LIBRARIES}
+  ${catkin_LIBRARIES} ${CERES_LIBRARIES}
 )
 
 #############
