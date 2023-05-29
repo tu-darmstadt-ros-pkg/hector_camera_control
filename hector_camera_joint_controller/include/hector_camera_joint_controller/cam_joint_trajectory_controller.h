@@ -85,6 +85,9 @@ public:
 
   double desired_pos_;
 
+  double lower_limit_;
+  double upper_limit_;
+
   double reached_threshold_;
 
   ros::Publisher joint_target_pub_;
@@ -126,7 +129,8 @@ private:
   bool ComputeDirectionForPoint(const geometry_msgs::PointStamped& lookat_point, geometry_msgs::QuaternionStamped& orientation);
   bool ComputeHeightForPoint(const geometry_msgs::PointStamped& lookat_point, double& height);
 
-  void ComputeAndSendJointCommand(const geometry_msgs::QuaternionStamped& command_to_use);
+  bool ComputeJointCommand(const geometry_msgs::QuaternionStamped& command_to_use, Eigen::Vector3d& joint_values);
+  void SendJointCommand(const Eigen::Vector3d& joint_values);
   bool aimAtPOI(const geometry_msgs::PointStamped& poi_position);
 
   void transitionCb(actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> gh);

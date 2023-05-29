@@ -48,6 +48,21 @@
 
 namespace cam_control {
 
+double normalize_angle(double x)
+{
+  if(x > M_PI)
+  {
+    return x - 2 * M_PI;
+  }
+  else if (x < -M_PI)
+  {
+    return x + 2 * M_PI;
+  }
+  else{
+    return x;
+  }
+}
+
 TrackedJoint::TrackedJoint(const std::string& joint_name,
              const std::string& topic,
              const double lower_limit,
@@ -63,6 +78,9 @@ TrackedJoint::TrackedJoint(const std::string& joint_name,
   this->state_.name[0] = joint_name;
 
   this->reached_threshold_ = reached_threshold;
+
+  this->lower_limit_ = lower_limit;
+  this->upper_limit_ = upper_limit;
 
   ROS_INFO_STREAM("Added joint " << joint_name << " topic: " << topic <<
                   " lowerl: " << lower_limit << " upperl: " << upper_limit <<
@@ -102,7 +120,7 @@ bool TrackedJoint::reachedTarget()
     return false;
   }
 
-  double diff_abs = std::abs(this->state_.position[0] - this->desired_pos_);
+  double diff_abs = std::abs(normalize_angle(this->state_.position[0]) - this->desired_pos_);
   ROS_INFO_STREAM("Joint diff_abs: " << diff_abs);
 
   if (diff_abs < this->reached_threshold_)
@@ -175,7 +193,9 @@ struct CostFunctor
     KDL::ChainFkSolverPos_recursive fk_solver(chain_);
     KDL::JntArray joint_positions(chain_.getNrOfJoints());
     for (size_t i = 0; i < chain_.getNrOfJoints(); ++i)
-      joint_positions(i) = x[i];
+    {
+      joint_positions(i) = normalize_angle(x[i]);
+    }
 
     KDL::Frame current_pose;
     fk_solver.JntToCart(joint_positions, current_pose);
@@ -184,7 +204,8 @@ struct CostFunctor
     KDL::Vector b = current_pose.M.UnitX(); // Assumes we want to point with x axis towards POI
 
     // Minimize over joint angle between camera optical axis (b) and a = p - x (direction towards POI from camera center)
-    residual[0] = acos(KDL::dot(a, b) / (a.Norm() + b.Norm()));
+    // Same as acos(a*b / ||a|| * ||b||), but with better conditioning
+    residual[0] = 2 * atan((a * b.Norm() - a.Norm() * b).Norm() / (a * b.Norm() + a.Norm() * b).Norm());
 
     return true;
   }
@@ -557,7 +578,20 @@ bool CamJointTrajControl::ComputeDirectionForPoint(const geometry_msgs::PointSta
   return true;
 }
 
-void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::QuaternionStamped& command_to_use)
+void CamJointTrajControl::SendJointCommand(const Eigen::Vector3d& joint_values)
+{
+
+  joint_manager_.getJoint(0).setTarget(joint_values[0]);
+
+  if ((joint_manager_.getNumJoints() > 1) && !this->has_elevating_mast_)
+  {
+    joint_manager_.getJoint(1).setTarget(joint_values[1]);
+  }
+
+  return;
+}
+
+bool CamJointTrajControl::ComputeJointCommand(const geometry_msgs::QuaternionStamped& command_to_use, Eigen::Vector3d& joint_angles)
 {
   tf::StampedTransform transform;
 
@@ -566,7 +600,7 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
   }
   catch (tf::TransformException ex){
     ROS_WARN("Failed to transform, not sending command to joints: %s",ex.what());
-    return;
+    return false;
   }
 
   rotation_ = Eigen::Quaterniond(command_to_use.quaternion.w, command_to_use.quaternion.x, command_to_use.quaternion.y, command_to_use.quaternion.z);
@@ -599,7 +633,7 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
 
     default:
       ROS_ERROR("Invalid joint rotation convention!");
-      return;
+      return false;
   }
 
   Eigen::Vector3d desAngle(
@@ -612,7 +646,7 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
     transform_listener_->lookupTransform(robot_link_reference_frame_, lookat_frame_, ros::Time(0), current_state_transform);
   }catch (tf::TransformException ex){
     ROS_WARN("Failed to transform, not sending command to joints: %s",ex.what());
-    return;
+    return false;
   }
 
   double roll, pitch, yaw;
@@ -646,7 +680,7 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
 
     default:
       ROS_ERROR("Invalid joint rotation convention!");
-      return;
+      return false;
   }
 
   //Eigen::Vector3d angles = rotation_.matrix().eulerAngles(2, 0, 2);
@@ -697,17 +731,12 @@ void CamJointTrajControl::ComputeAndSendJointCommand(const geometry_msgs::Quater
     }
 
     gh_list_.push_back(joint_traj_client_->sendGoal(goal, boost::bind(&CamJointTrajControl::transitionCb, this, _1)));
-  }else{
-    joint_manager_.getJoint(0).setTarget(desAngle[0]);
-
-    if ((joint_manager_.getNumJoints() > 1 ) && !this->has_elevating_mast_){
-      joint_manager_.getJoint(1).setTarget(desAngle[1]);
-    }
-
-    //joint_manager_.getJoint(1).setTarget(desAngle[1]);
-    //servo_pub_1_.publish(desAngle[0]);
-    //servo_pub_2_.publish(desAngle[1]);
+    return false;
   }
+
+  joint_angles = desAngle;
+
+  return true;
 }
 
 bool CamJointTrajControl::ComputeHeightForPoint(const geometry_msgs::PointStamped& lookat_point, double& height)
@@ -899,7 +928,11 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
           geometry_msgs::QuaternionStamped command_quat;
           if (this->ComputeDirectionForPoint(this->lookat_point_, command_quat))
           {
-            this->ComputeAndSendJointCommand(command_quat);
+            Eigen::Vector3d joint_angles;
+            if(this->ComputeJointCommand(command_quat, joint_angles))
+            {
+              this->SendJointCommand(joint_angles);
+            }
           }
         }
 
@@ -931,7 +964,12 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
         command_to_use.header.frame_id = default_look_dir_frame_;
 
         tf::quaternionTFToMsg(stab_transform.getRotation().inverse(), command_to_use.quaternion);
-        this->ComputeAndSendJointCommand(command_to_use);
+        Eigen::Vector3d joint_angles;
+        if(this->ComputeJointCommand(command_to_use, joint_angles))
+        {
+          this->SendJointCommand(joint_angles);
+        }
+
       }
 
     }else{
@@ -943,7 +981,11 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
 
     if (control_mode_ == MODE_ORIENTATION){
       if (latest_orientation_cmd_.get()){
-        this->ComputeAndSendJointCommand(*latest_orientation_cmd_);
+        Eigen::Vector3d joint_angles;
+        if(this->ComputeJointCommand(*latest_orientation_cmd_, joint_angles))
+        {
+          this->SendJointCommand(joint_angles);
+        };
         latest_orientation_cmd_.reset();
         joint_trajectory_preempted_ = false;
         control_mode_ = MODE_OFF;
@@ -952,11 +994,34 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
   }
 }
 
+double cost_functio(KDL::ChainFkSolverPos_recursive solver, KDL::Vector poi_position_, double* x){
+      KDL::JntArray joint_positions(2);
+      joint_positions(0) = x[0];
+      joint_positions(1) = x[1];
+
+      KDL::Frame current_pose;
+      solver.JntToCart(joint_positions, current_pose);
+
+      KDL::Vector a = poi_position_ - current_pose.p;
+      KDL::Vector b = current_pose.M.UnitX(); // Assumes we want to point with x axis towards POI
+
+      return 2 * atan((a * b.Norm() - a.Norm() * b).Norm() / (a * b.Norm() + a.Norm() * b).Norm());
+}
+
 bool CamJointTrajControl::aimAtPOI(const geometry_msgs::PointStamped& poi_position){
+  geometry_msgs::QuaternionStamped command_quat;
+  Eigen::Vector3d pre_angles;
+
+  if (this->ComputeDirectionForPoint(poi_position, command_quat))
+  {
+    this->ComputeJointCommand(command_quat, pre_angles);
+  }
+
 
   // The variable to solve for with its initial value.
-  double desired_angles[2] = {0.0, 0.0};
-
+  double desired_angles[2] = {pre_angles(0), pre_angles(1)};
+  ROS_INFO("Precomputed angle: %f", desired_angles[0]);
+  ROS_INFO("Precomputed angle: %f", desired_angles[1]);
   KDL::Chain chain;
   if (!tree_.getChain(robot_link_reference_frame_, aim_frame_, chain)){
     ROS_WARN("Could not find link %s required for aiming at the POI", aim_frame_.c_str());
@@ -986,7 +1051,32 @@ bool CamJointTrajControl::aimAtPOI(const geometry_msgs::PointStamped& poi_positi
   ceres::CostFunction* cost_function =
   new ceres::NumericDiffCostFunction<CostFunctor, ceres::CENTRAL, 1, 2>(
       new CostFunctor(chain, poi));
+
+  // Add the residual block
   problem.AddResidualBlock(cost_function, nullptr, desired_angles);
+
+  // Add a virtual continuous manifold if joint is continuous
+  if(joint_manager_.getJoint(0).lower_limit_ > -3.14  || joint_manager_.getJoint(0).upper_limit_ < 3.14)
+  {
+    problem.SetParameterLowerBound(desired_angles, 0, joint_manager_.getJoint(0).lower_limit_);
+    problem.SetParameterUpperBound(desired_angles, 0, joint_manager_.getJoint(0).upper_limit_);
+  } else{
+    problem.SetParameterLowerBound(desired_angles, 0, -2.0 * M_PI);
+    problem.SetParameterUpperBound(desired_angles, 0, 2.0 * M_PI);
+  }
+
+  if ((joint_manager_.getNumJoints() > 1 ) && !this->has_elevating_mast_)
+  {
+    if(joint_manager_.getJoint(1).lower_limit_ > -3.14  || joint_manager_.getJoint(1).upper_limit_ < 3.14)
+    {
+      problem.SetParameterLowerBound(desired_angles, 1, joint_manager_.getJoint(1).lower_limit_);
+      problem.SetParameterUpperBound(desired_angles, 1, joint_manager_.getJoint(1).upper_limit_);
+    }
+    else{
+      problem.SetParameterLowerBound(desired_angles, 1, -2.0 * M_PI);
+      problem.SetParameterUpperBound(desired_angles, 1, 2.0 * M_PI);
+    }
+  }
 
   // Run the solver!
   ceres::Solver::Options options;
@@ -994,6 +1084,7 @@ bool CamJointTrajControl::aimAtPOI(const geometry_msgs::PointStamped& poi_positi
   options.function_tolerance = 1e-8;
   options.gradient_tolerance = 1e-8;
   options.parameter_tolerance = 1e-8;
+  options.max_num_iterations = 1000;
 
   ceres::Solver::Summary summary;
   ceres::Solve(options, &problem, &summary);
@@ -1006,11 +1097,11 @@ bool CamJointTrajControl::aimAtPOI(const geometry_msgs::PointStamped& poi_positi
     std::cout << desired_angles[i] << " ";
   std::cout << "\n";
 
-  joint_manager_.getJoint(0).setTarget(desired_angles[0]);
+  Eigen::Vector3d optimized_joint_angles(desired_angles[0], desired_angles[1], 0.0);
+  SendJointCommand(optimized_joint_angles);
 
-  if ((joint_manager_.getNumJoints() > 1 ) && !this->has_elevating_mast_){
-    joint_manager_.getJoint(1).setTarget(desired_angles[1]);
-  }
+  KDL::Chain chain_ = chain;
+  KDL::ChainFkSolverPos_recursive fk_solver(chain_);
 
   return true;
 }
