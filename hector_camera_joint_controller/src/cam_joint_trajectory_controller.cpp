@@ -121,7 +121,7 @@ bool TrackedJoint::reachedTarget()
   }
 
   double diff_abs = std::abs(normalize_angle(this->state_.position[0]) - this->desired_pos_);
-  ROS_INFO_STREAM("Joint diff_abs: " << diff_abs);
+  ROS_DEBUG_STREAM("Joint diff_abs: " << diff_abs);
 
   if (diff_abs < this->reached_threshold_)
   {
@@ -994,20 +994,6 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
   }
 }
 
-double cost_functio(KDL::ChainFkSolverPos_recursive solver, KDL::Vector poi_position_, double* x){
-      KDL::JntArray joint_positions(2);
-      joint_positions(0) = x[0];
-      joint_positions(1) = x[1];
-
-      KDL::Frame current_pose;
-      solver.JntToCart(joint_positions, current_pose);
-
-      KDL::Vector a = poi_position_ - current_pose.p;
-      KDL::Vector b = current_pose.M.UnitX(); // Assumes we want to point with x axis towards POI
-
-      return 2 * atan((a * b.Norm() - a.Norm() * b).Norm() / (a * b.Norm() + a.Norm() * b).Norm());
-}
-
 bool CamJointTrajControl::aimAtPOI(const geometry_msgs::PointStamped& poi_position){
   geometry_msgs::QuaternionStamped command_quat;
   Eigen::Vector3d pre_angles;
@@ -1017,11 +1003,16 @@ bool CamJointTrajControl::aimAtPOI(const geometry_msgs::PointStamped& poi_positi
     this->ComputeJointCommand(command_quat, pre_angles);
   }
 
+  ROS_INFO("Precomputed angle: %f", pre_angles(0));
+  ROS_INFO("Precomputed angle: %f", pre_angles(1));
 
-  // The variable to solve for with its initial value.
-  double desired_angles[2] = {pre_angles(0), pre_angles(1)};
-  ROS_INFO("Precomputed angle: %f", desired_angles[0]);
-  ROS_INFO("Precomputed angle: %f", desired_angles[1]);
+  // The variable to solve for with its initial precomputed value respecting joint limits
+  double desired_angles[2];
+  desired_angles[0] = std::max(std::min(pre_angles(0), joint_manager_.getJoint(0).upper_limit_),
+                               joint_manager_.getJoint(0).lower_limit_);
+  desired_angles[1] = std::max(std::min(pre_angles(1), joint_manager_.getJoint(1).upper_limit_),
+                               joint_manager_.getJoint(1).lower_limit_);
+
   KDL::Chain chain;
   if (!tree_.getChain(robot_link_reference_frame_, aim_frame_, chain)){
     ROS_WARN("Could not find link %s required for aiming at the POI", aim_frame_.c_str());
