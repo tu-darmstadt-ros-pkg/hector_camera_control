@@ -43,6 +43,8 @@
 #include <eigen3/Eigen/Core>
 #include <eigen3/Eigen/Geometry>
 
+#include <kdl/tree.hpp>
+
 #include <actionlib/client/simple_action_client.h>
 #include <actionlib/client/action_client.h>
 #include <actionlib/server/simple_action_server.h>
@@ -82,6 +84,9 @@ public:
   sensor_msgs::JointState state_;
 
   double desired_pos_;
+
+  double lower_limit_;
+  double upper_limit_;
 
   double reached_threshold_;
 
@@ -124,7 +129,9 @@ private:
   bool ComputeDirectionForPoint(const geometry_msgs::PointStamped& lookat_point, geometry_msgs::QuaternionStamped& orientation);
   bool ComputeHeightForPoint(const geometry_msgs::PointStamped& lookat_point, double& height);
 
-  void ComputeAndSendJointCommand(const geometry_msgs::QuaternionStamped& command_to_use);
+  bool ComputeJointCommand(const geometry_msgs::QuaternionStamped& command_to_use, Eigen::Vector3d& joint_values);
+  void SendJointCommand(const Eigen::Vector3d& joint_values);
+  bool aimAtPOI(const geometry_msgs::PointStamped& poi_position);
 
   void transitionCb(actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> gh);
 
@@ -150,6 +157,7 @@ private:
   std::string controller_namespace_;
   std::string robot_link_reference_frame_;
   std::string lookat_frame_;
+  std::string aim_frame_;
 
   std::string default_look_dir_frame_;
   bool stabilize_default_look_dir_frame_;
@@ -188,6 +196,8 @@ private:
   std::vector<std::string> joint_names_;
 
   TrackedJointManager joint_manager_;
+
+  KDL::Tree tree_;
 
   geometry_msgs::QuaternionStamped::ConstPtr latest_orientation_cmd_;
   Eigen::Quaterniond rotation_;
