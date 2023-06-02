@@ -1080,19 +1080,11 @@ bool CamJointTrajControl::aimAtPOI(const geometry_msgs::PointStamped& poi_positi
   ceres::Solver::Summary summary;
   ceres::Solve(options, &problem, &summary);
 
-  ROS_INFO("Computing aiming direction took: %fs", summary.total_time_in_seconds);
-  ROS_INFO_STREAM(summary.BriefReport());
-
-  std::cout << "Computed joint states: ";
-  for (size_t i = 0; i < 2; ++i)
-    std::cout << desired_angles[i] << " ";
-  std::cout << "\n";
+  ROS_DEBUG("Computing aiming direction took: %fs", summary.total_time_in_seconds);
+  ROS_DEBUG_STREAM(summary.BriefReport());
 
   Eigen::Vector3d optimized_joint_angles(desired_angles[0], desired_angles[1], 0.0);
   SendJointCommand(optimized_joint_angles);
-
-  KDL::Chain chain_ = chain;
-  KDL::ChainFkSolverPos_recursive fk_solver(chain_);
 
   return true;
 }
