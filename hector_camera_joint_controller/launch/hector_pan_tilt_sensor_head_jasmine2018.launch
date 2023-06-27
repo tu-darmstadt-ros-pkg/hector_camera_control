@@ -6,19 +6,21 @@
      <rosparam file="$(find hector_camera_joint_controller)/config/jasmine_merkel_sensor_head_patterns.yaml" command="load" />
   </group>  
   
-  <node name="pan_tilt_sensor_head_joint_control" pkg="hector_camera_joint_controller" type="cam_joint_trajectory_controller" respawn="true" output="screen">
+  <node name="pan_tilt_sensor_head_joint_control" pkg="hector_camera_joint_controller" type="cam_joint_trajectory_controller" respawn="false" output="screen">
     <param name="controller_namespace" value="/sensor_head_control/sensor_head_traj_controller" />
     <param name="control_loop_period" value="0.1" />
-    <param name="command_goal_time_from_start" value="0.3" />
+    <param name="command_goal_time_from_start" value="0.8" />
 
     <param name="robot_link_reference_frame" value="base_link" />
     <param name="lookat_reference_frame" value="sensor_head_mount_link" />
+    <param name="look_at_sensor_frame" value="sensor_head_rgbd_cam_link"/>
 
-    <param name="default_direction_reference_frame" value="base_link" />
+    <param name="default_direction_reference_frame" value="base_stabilized" />
     <param name="stabilize_default_direction_reference" value="false" />
 
     <param name="joint_order_type" value="zyx" />
     <param name="use_planning_based_pointing" value="true" />
     <param name="use_collision_checks_in_orientation_mode" value="true" />
+    <param name="publish_debug_pattern" value="true" />
   </node>
 </launch>

@@ -98,6 +98,9 @@ void CamJointTrajControl::Init()
   lookat_frame_ = std::string("sensor_head_mount_link");
   pnh_.getParam("lookat_reference_frame", lookat_frame_);
 
+  lookat_sensor_frame_ = "sensor_head_rgbd_cam_link";
+  pnh_.getParam("look_at_sensor_frame", lookat_sensor_frame_);
+
   command_goal_time_from_start_ = 0.3;
   pnh_.getParam("command_goal_time_from_start", command_goal_time_from_start_);
 
@@ -113,6 +116,9 @@ void CamJointTrajControl::Init()
 
   std::string type_string;
   pnh_.getParam("joint_order_type", type_string);
+
+  publish_debug_pattern_ = false;
+  pnh_.getParam("publish_debug_pattern", publish_debug_pattern_);
 
 
   pnh_.getParam("use_direct_position_commands", use_direct_position_commands_);
@@ -157,13 +163,14 @@ void CamJointTrajControl::Init()
   if (!disable_orientation_camera_command_input_){
     sub_ = nh_.subscribe("/camera/command", 1, &CamJointTrajControl::cmdCallback, this);
   }
-  sub_camera_twist_ = nh_.subscribe("/camera/command_twist", 1, &CamJointTrajControl::cameraTwistCallback, this);
+  sub_camera_twist_ = pnh_.subscribe("/camera/command_twist", 1, &CamJointTrajControl::cameraTwistCallback, this);
 
   this->Reset();
 
   //Sleep for short time to let tf receive messages
   ros::Duration(1.0).sleep();
 
+  if(publish_debug_pattern_) pattern_visualization_pub_ = pnh_.advertise<visualization_msgs::Marker>("pattern", 1);
 
   look_at_server_ = std::make_shared<actionlib::SimpleActionServer<hector_perception_msgs::LookAtAction>>(pnh_, "look_at", false);
   look_at_server_->registerGoalCallback(boost::bind(&CamJointTrajControl::lookAtGoalCallback, this));
@@ -194,6 +201,14 @@ void CamJointTrajControl::getJointNamesFromMoveGroup()
   for (unsigned int i = 0; i < joint_names_.size(); ++i){
     ROS_INFO("[cam joint ctrl] Joint %d : %s", static_cast<int>(i), joint_names_[i].c_str());
   }
+  // Set max_axis_speed
+  ROS_INFO_STREAM("Max axis speed: "<<max_axis_speed_);
+    for(const auto & joint: group->getJointModels()){
+      for(const auto& bound: joint->getVariableBounds()){
+        if(bound.velocity_bounded_)max_axis_speed_ = std::min(max_axis_speed_, bound.max_velocity_);
+        ROS_INFO_STREAM("\tJoint: "<<joint->getName()<<" max velocity: "<<bound.max_velocity_);
+      }
+    }
 }
 
 void CamJointTrajControl::getJointNamesFromController(ros::NodeHandle& nh)
@@ -258,7 +273,7 @@ bool CamJointTrajControl::planAndMoveToPoint(const geometry_msgs::PointStamped& 
   visibility.target_radius = 0.05;
 
   visibility.target_pose.header.frame_id = point.header.frame_id;
-  visibility.sensor_pose.header.frame_id = lookat_frame_;
+  visibility.sensor_pose.header.frame_id = lookat_sensor_frame_;
 
   visibility.sensor_pose.pose.position.x = 0.1;
   visibility.sensor_pose.pose.orientation.w = 1.0;
@@ -284,7 +299,7 @@ bool CamJointTrajControl::planAndMoveToPoint(const geometry_msgs::PointStamped& 
 
   req.motion_plan_request.group_name = move_group_name_;
   req.motion_plan_request.goal_constraints.push_back(constraints);
-  req.motion_plan_request.allowed_planning_time = 0.2;
+  req.motion_plan_request.allowed_planning_time = 0.5;
   req.motion_plan_request.max_velocity_scaling_factor = velocity_scaling_factor;
 
   bool plan_retrieval_success = this->get_plan_service_client_.call(req, res);
@@ -826,6 +841,37 @@ void CamJointTrajControl::transitionCb(actionlib::ClientGoalHandle<control_msgs:
   */
 }
 
+void CamJointTrajControl::visualizePattern(const std::string& pattern_name){
+  ROS_INFO_STREAM("Starting visualize Pattern, Pattern name "<<pattern_name);
+  const std::vector<TargetPointPatternElement>& curr_pattern = patterns_.at(pattern_name);
+  if (curr_pattern.empty())return;
+  visualization_msgs::Marker lineMarker;
+  lineMarker.header.frame_id = curr_pattern[0].target_point.header.frame_id;
+  lineMarker.header.stamp = ros::Time::now();
+  lineMarker.ns = "lines";
+  lineMarker.id = 0;
+  lineMarker.action = visualization_msgs::Marker::ADD;
+  lineMarker.type = visualization_msgs::Marker::LINE_LIST;
+  lineMarker.scale.x = 0.05;
+  lineMarker.color.r = 1.0;
+  lineMarker.color.g = 0.0;
+  lineMarker.color.b = 0.0;
+  lineMarker.color.a = 1.0;
+
+  // Create line segments between adjacent points
+  for (size_t i = 0; i < curr_pattern.size() - 1; ++i) {
+    geometry_msgs::Point p1 = curr_pattern[i].target_point.point;
+    geometry_msgs::Point p2 = curr_pattern[i + 1].target_point.point;
+    lineMarker.points.push_back(p1);
+    lineMarker.points.push_back(p2);
+  }
+
+
+  pattern_visualization_pub_.publish(lineMarker);
+  ROS_INFO("Visualized Pattern");
+
+}
+
 void CamJointTrajControl::lookAtGoalCallback()
 {
   actionlib::SimpleActionServer<hector_perception_msgs::LookAtAction>::GoalConstPtr goal = look_at_server_->acceptNewGoal();
@@ -836,6 +882,8 @@ void CamJointTrajControl::lookAtGoalCallback()
 
     if (findPattern(goal->look_at_target.pattern)){
       ROS_INFO("Starting pattern %s", goal->look_at_target.pattern.c_str());
+
+      if(publish_debug_pattern_) visualizePattern(goal->look_at_target.pattern);
 
       // Setup pattern following
       current_pattern_name_ = goal->look_at_target.pattern;

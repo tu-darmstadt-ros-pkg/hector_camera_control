@@ -104,11 +104,14 @@ private:
 
   void cameraTwistCallback(const geometry_msgs::Twist::ConstPtr& twist_msg);
 
+  void visualizePattern(const std::string& pattern_name);
+
   unsigned int rotationConv;
 
   std::string controller_namespace_;
   std::string robot_link_reference_frame_;
   std::string lookat_frame_;
+  std::string lookat_sensor_frame_;
 
   std::string default_look_dir_frame_;
   bool stabilize_default_look_dir_frame_;
@@ -136,6 +139,7 @@ private:
   tf::TransformListener* transform_listener_;
 
   ros::Publisher pattern_info_pub_;
+  ros::Publisher pattern_visualization_pub_;
 
   ros::ServiceClient get_plan_service_client_;
 
@@ -175,6 +179,7 @@ private:
   bool use_planning_based_pointing_;
   bool disable_orientation_camera_command_input_;
   bool use_collision_checks_in_orientation_mode_;
+  bool publish_debug_pattern_;
 };
 
 }
