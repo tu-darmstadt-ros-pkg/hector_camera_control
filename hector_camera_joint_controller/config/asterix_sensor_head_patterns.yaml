@@ -1,0 +1,12 @@
+patterns: [
+    {name: look_around_up,
+    waypoints: [
+        { frame_id: base_stabilized, target_point: [ -2.0,  0.0, 0.2 ], goto_velocity_factor: 0.1, stay_time: 0.0 },
+        { frame_id: base_stabilized, target_point: [ -1.5, -0.1, 0.2 ], goto_velocity_factor: 0.1, stay_time: 0.0 },
+        { frame_id: base_stabilized, target_point: [ -1.5, -0.1, 0.6 ], goto_velocity_factor: 0.1, stay_time: 0.0 },
+        { frame_id: base_stabilized, target_point: [ -2.0,  0.0, 0.6 ], goto_velocity_factor: 0.1, stay_time: 0.0 },
+        { frame_id: base_stabilized, target_point: [ -1.5,  0.9, 0.6 ], goto_velocity_factor: 0.1, stay_time: 0.0 },
+        { frame_id: base_stabilized, target_point: [ -1.5,  0.9, 0.2 ], goto_velocity_factor: 0.1, stay_time: 0.0 }
+    ]
+    }
+]
