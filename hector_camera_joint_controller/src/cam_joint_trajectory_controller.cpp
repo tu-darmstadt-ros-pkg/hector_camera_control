@@ -63,6 +63,11 @@ double normalize_angle(double x)
   }
 }
 
+TrackedJointManager::TrackedJointManager()
+{
+  model_.initParam("/robot_description");
+}
+
 TrackedJoint::TrackedJoint(const std::string& joint_name,
              const std::string& topic,
              const double lower_limit,
@@ -138,18 +143,12 @@ void TrackedJointManager::addJoint(const std::string& ns, ros::NodeHandle& nh)
   double max_val;
   double reached_threshold;
   nh.getParam(ns + "/name", joint_name);
-  nh.getParam(ns +"/topic", topic);
-  nh.param(ns +"/limit_lower", min_val, -M_PI);
-  nh.param(ns +"/limit_upper", max_val, M_PI);
+  nh.getParam(ns + "/topic", topic);
   nh.param(ns +"/reached_threshold", reached_threshold, 0.05);
 
-  this->addJoint(TrackedJoint(joint_name,
-                              topic,
-                              min_val,
-                              max_val,
-                              reached_threshold,
-                              nh));
+  auto joint_limits = model_.getJoint(joint_name)->limits;
 
+  this->addJoint(TrackedJoint(joint_name, topic, joint_limits->lower, joint_limits->upper, reached_threshold, nh));
 }
 
 void TrackedJointManager::addJoint(const TrackedJoint& joint)

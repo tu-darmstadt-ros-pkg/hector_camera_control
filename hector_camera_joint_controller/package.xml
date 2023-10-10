@@ -25,6 +25,7 @@
   <depend>libceres-dev</depend>
   <depend>liborocos-kdl</depend>
   <depend>kdl_parser</depend>
+  <depend>urdf</depend>
 
   <export>
   </export>
