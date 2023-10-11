@@ -56,6 +56,7 @@
 
 #include <moveit/robot_model_loader/robot_model_loader.h>
 #include <moveit/robot_state/robot_state.h>
+#include <urdf/model.h>
 
 namespace cam_control
 {
@@ -95,6 +96,7 @@ public:
 
 class TrackedJointManager{
 public:
+  TrackedJointManager();
   void addJoint(const std::string& ns, ros::NodeHandle& nh);
   void addJoint(const TrackedJoint& joint);
   void updateState(const sensor_msgs::JointState& msg);
@@ -104,6 +106,7 @@ public:
   size_t getNumJoints() { return tracked_joints_.size(); };
 
   std::vector<TrackedJoint> tracked_joints_;
+  urdf::Model model_;
 };
 
 class CamJointTrajControl

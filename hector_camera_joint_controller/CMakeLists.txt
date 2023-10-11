@@ -14,6 +14,7 @@ find_package(catkin REQUIRED COMPONENTS
   moveit_ros_planning
   tf_conversions
   kdl_parser
+  urdf
 )
 
 find_package(Eigen3 REQUIRED)
