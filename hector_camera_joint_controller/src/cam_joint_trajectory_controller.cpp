@@ -32,6 +32,9 @@
 #include <angles/angles.h>
 #include <std_msgs/Float64.h>
 #include <std_msgs/builtin_double.h>
+#include <algorithm>
+#include <iterator>
+#include <random>
 
 #include <moveit_msgs/GetMotionPlan.h>
 
@@ -87,9 +90,8 @@ TrackedJoint::TrackedJoint(const std::string& joint_name,
   this->lower_limit_ = lower_limit;
   this->upper_limit_ = upper_limit;
 
-  ROS_INFO_STREAM("Added joint " << joint_name << " topic: " << topic <<
-                  " lowerl: " << lower_limit << " upperl: " << upper_limit <<
-                  " reached thresh: " << reached_threshold);
+  ROS_INFO_STREAM("Added joint " << joint_name << " topic: " << topic << " lowerl: " << lower_limit
+                                 << " upperl: " << upper_limit << " reached thresh: " << reached_threshold);
 
   joint_target_pub_ = nh.advertise<std_msgs::Float64>("/" + topic,1,false);
 }
@@ -125,7 +127,7 @@ bool TrackedJoint::reachedTarget()
     return false;
   }
 
-  double diff_abs = std::abs(normalize_angle(this->state_.position[0]) - this->desired_pos_);
+  double diff_abs = std::abs(normalize_angle(this->state_.position[0] - this->desired_pos_));
   ROS_DEBUG_STREAM("Joint diff_abs: " << diff_abs);
 
   if (diff_abs < this->reached_threshold_)
@@ -167,8 +169,8 @@ void TrackedJointManager::updateState(const sensor_msgs::JointState& msg)
 
 bool TrackedJointManager::reachedTarget()
 {
-
-  for (size_t i = 0; i < tracked_joints_.size(); ++i)
+  // Only check the state of pan and tilt joint
+  for (size_t i = 0; i < std::min(2, static_cast<int>(tracked_joints_.size())); ++i)
   {
     if (!tracked_joints_[i].reachedTarget())
     {
@@ -182,7 +184,8 @@ bool TrackedJointManager::reachedTarget()
 struct CostFunctor
 {
   // Constructor
-  CostFunctor(const KDL::Chain& chain, const KDL::Vector& poi_position) : poi_position_(poi_position), chain_(chain)
+  CostFunctor(const KDL::Chain& chain, const KDL::Vector& poi_position, std::vector<TrackedJoint> joints)
+    : chain_(chain), poi_position_(poi_position), tracked_joints_(joints)
   {
   }
 
@@ -191,9 +194,29 @@ struct CostFunctor
     // Compute forward kinematics
     KDL::ChainFkSolverPos_recursive fk_solver(chain_);
     KDL::JntArray joint_positions(chain_.getNrOfJoints());
-    for (size_t i = 0; i < chain_.getNrOfJoints(); ++i)
+
+    int non_joint_counter = 0;
+    for (unsigned int i = 0; i < chain_.getNrOfSegments(); ++i)
     {
-      joint_positions(i) = normalize_angle(x[i]);
+      for (unsigned int j = 0; j < tracked_joints_.size(); j++)
+      {
+        if (tracked_joints_[j].state_.name[0] == chain_.getSegment(i).getJoint().getName())
+        {
+          if (j < 2)
+          {
+            joint_positions(i - non_joint_counter) = normalize_angle(x[j]);
+          }
+          else
+          {
+            joint_positions(i - non_joint_counter) = tracked_joints_[j].state_.position[0];
+          }
+          break;
+        }
+      }
+      if (chain_.getSegment(i).getJoint().getType() == KDL::Joint::JointType::None)
+      {
+        non_joint_counter++;
+      }
     }
 
     KDL::Frame current_pose;
@@ -212,6 +235,7 @@ struct CostFunctor
 private:
   KDL::Chain chain_;  // Forward kinematics chain
   KDL::Vector poi_position_;
+  std::vector<TrackedJoint> tracked_joints_;
 };
 
 enum
@@ -341,6 +365,15 @@ void CamJointTrajControl::Init()
       joint_manager_.addJoint("joint1", pnh_);
     }
 
+    if (pnh_.hasParam("joint2/name"))
+    {
+      joint_manager_.addJoint("joint2", pnh_);
+    }
+
+    if (pnh_.hasParam("joint3/name"))
+    {
+      joint_manager_.addJoint("joint3", pnh_);
+    }
 
     /*
     if (has_elevating_mast_){
@@ -1002,15 +1035,18 @@ bool CamJointTrajControl::aimAtPOI(const geometry_msgs::PointStamped& poi_positi
     this->ComputeJointCommand(command_quat, pre_angles);
   }
 
-  ROS_INFO("Precomputed angle: %f", pre_angles(0));
-  ROS_INFO("Precomputed angle: %f", pre_angles(1));
+  ROS_DEBUG("Precomputed pan angle: %f", pre_angles(0));
+  ROS_DEBUG("Precomputed tilt angle: %f", pre_angles(1));
 
   // The variable to solve for with its initial precomputed value respecting joint limits
-  double desired_angles[2];
-  desired_angles[0] = std::max(std::min(pre_angles(0), joint_manager_.getJoint(0).upper_limit_),
-                               joint_manager_.getJoint(0).lower_limit_);
-  desired_angles[1] = std::max(std::min(pre_angles(1), joint_manager_.getJoint(1).upper_limit_),
-                               joint_manager_.getJoint(1).lower_limit_);
+  const int n = 2;
+  double desired_angles[n];
+
+  for (int i = 0; i < n; i++)
+  {
+    desired_angles[i] = std::max(std::min(pre_angles(i), joint_manager_.getJoint(i).upper_limit_),
+                                 joint_manager_.getJoint(i).lower_limit_);
+  }
 
   KDL::Chain chain;
   if (!tree_.getChain(robot_link_reference_frame_, aim_frame_, chain)){
@@ -1035,54 +1071,92 @@ bool CamJointTrajControl::aimAtPOI(const geometry_msgs::PointStamped& poi_positi
 
   KDL::Vector poi(poi_in_reference_frame.point.x, poi_in_reference_frame.point.y, poi_in_reference_frame.point.z);
 
-  // Build the problem.
-  ceres::Problem problem;
+  // Number of optimization attempts
+  int num_attempts = 20;
 
-  ceres::CostFunction* cost_function =
-  new ceres::NumericDiffCostFunction<CostFunctor, ceres::CENTRAL, 1, 2>(
-      new CostFunctor(chain, poi));
+  // Variables to store the best result
+  double best_residual = std::numeric_limits<double>::max();
+  double best_result[n];
+  std::default_random_engine generator;
 
-  // Add the residual block
-  problem.AddResidualBlock(cost_function, nullptr, desired_angles);
-
-  // Add a virtual continuous manifold if joint is continuous
-  if(joint_manager_.getJoint(0).lower_limit_ > -3.14  || joint_manager_.getJoint(0).upper_limit_ < 3.14)
+  for (int attempt = 0; attempt < num_attempts; attempt++)
   {
-    problem.SetParameterLowerBound(desired_angles, 0, joint_manager_.getJoint(0).lower_limit_);
-    problem.SetParameterUpperBound(desired_angles, 0, joint_manager_.getJoint(0).upper_limit_);
-  } else{
-    problem.SetParameterLowerBound(desired_angles, 0, -2.0 * M_PI);
-    problem.SetParameterUpperBound(desired_angles, 0, 2.0 * M_PI);
-  }
+    // Build the problem.
+    ceres::Problem problem;
+    ceres::Solver::Options options;
 
-  if ((joint_manager_.getNumJoints() > 1 ) && !this->has_elevating_mast_)
-  {
-    if(joint_manager_.getJoint(1).lower_limit_ > -3.14  || joint_manager_.getJoint(1).upper_limit_ < 3.14)
+    // Initialize desired_angles with different initial values for each attempt
+    for (int i = 0; i < n && attempt > 0; i++)
     {
-      problem.SetParameterLowerBound(desired_angles, 1, joint_manager_.getJoint(1).lower_limit_);
-      problem.SetParameterUpperBound(desired_angles, 1, joint_manager_.getJoint(1).upper_limit_);
+      std::uniform_real_distribution<double> distribution(joint_manager_.getJoint(i).lower_limit_,
+                                                          joint_manager_.getJoint(i).upper_limit_);
+      desired_angles[i] = distribution(generator);
     }
-    else{
-      problem.SetParameterLowerBound(desired_angles, 1, -2.0 * M_PI);
-      problem.SetParameterUpperBound(desired_angles, 1, 2.0 * M_PI);
+
+    ceres::CostFunction* cost_function = new ceres::NumericDiffCostFunction<CostFunctor, ceres::CENTRAL, 1, 2>(
+        new CostFunctor(chain, poi, joint_manager_.tracked_joints_));
+
+    problem.AddResidualBlock(cost_function, nullptr, desired_angles);
+
+    // Add a virtual continuous manifold if joint is continuous
+    if (joint_manager_.getJoint(0).lower_limit_ > -3.14 || joint_manager_.getJoint(0).upper_limit_ < 3.14)
+    {
+      problem.SetParameterLowerBound(desired_angles, 0, joint_manager_.getJoint(0).lower_limit_);
+      problem.SetParameterUpperBound(desired_angles, 0, joint_manager_.getJoint(0).upper_limit_);
+    }
+    else
+    {
+      problem.SetParameterLowerBound(desired_angles, 0, -2.0 * M_PI);
+      problem.SetParameterUpperBound(desired_angles, 0, 2.0 * M_PI);
+    }
+
+    if ((joint_manager_.getNumJoints() > 1) && !this->has_elevating_mast_)
+    {
+      if (joint_manager_.getJoint(1).lower_limit_ > -3.14 || joint_manager_.getJoint(1).upper_limit_ < 3.14)
+      {
+        problem.SetParameterLowerBound(desired_angles, 1, joint_manager_.getJoint(1).lower_limit_);
+        problem.SetParameterUpperBound(desired_angles, 1, joint_manager_.getJoint(1).upper_limit_);
+      }
+      else
+      {
+        problem.SetParameterLowerBound(desired_angles, 1, -2.0 * M_PI);
+        problem.SetParameterUpperBound(desired_angles, 1, 2.0 * M_PI);
+      }
+    }
+
+    options.minimizer_type = ceres::TRUST_REGION;
+    options.initial_trust_region_radius = 3;
+    options.max_trust_region_radius = 3;
+    options.use_nonmonotonic_steps = true;
+    options.gradient_tolerance = 1e-8;
+    options.parameter_tolerance = 1e-8;
+    options.function_tolerance = 1e-8;
+
+    options.max_num_iterations = 100;
+
+    ceres::Solver::Summary summary;
+    ceres::Solve(options, &problem, &summary);
+
+    if (summary.final_cost < best_residual)
+    {
+      // Store the best result
+      best_residual = summary.final_cost;
+      std::copy(std::begin(desired_angles), std::end(desired_angles), std::begin(best_result));
+    }
+
+    ROS_DEBUG_STREAM("Ceres report: " << summary.FullReport());
+
+    // If accuracy good enough, break early
+    if (best_residual < 0.0001)
+    {
+      break;
     }
   }
 
-  // Run the solver!
-  ceres::Solver::Options options;
-  options.linear_solver_type = ceres::DENSE_QR;
-  options.function_tolerance = 1e-8;
-  options.gradient_tolerance = 1e-8;
-  options.parameter_tolerance = 1e-8;
-  options.max_num_iterations = 1000;
+  ROS_DEBUG("Computed pan angle : %f", best_result[0]);
+  ROS_DEBUG("Computed tilt angle: %f", best_result[1]);
 
-  ceres::Solver::Summary summary;
-  ceres::Solve(options, &problem, &summary);
-
-  ROS_DEBUG("Computing aiming direction took: %fs", summary.total_time_in_seconds);
-  ROS_DEBUG_STREAM(summary.BriefReport());
-
-  Eigen::Vector3d optimized_joint_angles(desired_angles[0], desired_angles[1], 0.0);
+  Eigen::Vector3d optimized_joint_angles(best_result[0], best_result[1], 0.0);
   SendJointCommand(optimized_joint_angles);
 
   return true;
