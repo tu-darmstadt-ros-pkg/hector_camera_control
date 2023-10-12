@@ -302,7 +302,7 @@ void CamJointTrajControl::Init()
   pnh_.getParam("has_elevating_mast", has_elevating_mast_);
 
   pnh_.getParam("use_direct_position_commands", use_direct_position_commands_);
-  use_direct_position_commands_ = true;
+
   direct_position_command_default_wait_time_ = 4.0;
   pnh_.getParam("direct_position_command_default_wait_time", direct_position_command_default_wait_time_);
   
@@ -399,10 +399,10 @@ void CamJointTrajControl::getJointNamesFromMoveGroup()
     exit(0);
   }
   joint_names_ = group->getJointModelNames();
-  if (joint_names_.size() != 2) {
-    ROS_FATAL_STREAM("The move group '" << move_group_name_ << "' does not contain the correct amount of joints. Expected: 2; Found: " << joint_names_.size() << ". Exiting.");
-    exit(0);
-  }
+  // if (joint_names_.size() != 2) {
+  //   ROS_FATAL_STREAM("The move group '" << move_group_name_ << "' does not contain the correct amount of joints.
+  //   Expected: 2; Found: " << joint_names_.size() << ". Exiting."); exit(0);
+  // }
   for (unsigned int i = 0; i < joint_names_.size(); ++i){
     ROS_INFO("[cam joint ctrl] Joint %d : %s", static_cast<int>(i), joint_names_[i].c_str());
   }
@@ -473,7 +473,7 @@ bool CamJointTrajControl::planAndMoveToPoint(const geometry_msgs::PointStamped& 
   visibility.cone_sides = 4;
 
   visibility.max_view_angle = 0.0;
-  visibility.max_range_angle = M_PI * 5.0 / 180.0;
+  visibility.max_range_angle = M_PI * 2.0 / 180.0;
   visibility.sensor_view_direction = moveit_msgs::VisibilityConstraint::SENSOR_X;
   visibility.weight = 1.0;
   visibility.target_radius = 0.05;
@@ -483,7 +483,6 @@ bool CamJointTrajControl::planAndMoveToPoint(const geometry_msgs::PointStamped& 
 
   visibility.sensor_pose.pose.position.x = 0.1;
   visibility.sensor_pose.pose.orientation.w = 1.0;
-
 
   visibility.target_pose.pose.position = point.point;
   visibility.target_pose.pose.orientation.w = 1.0;
@@ -498,7 +497,10 @@ bool CamJointTrajControl::planAndMoveToPoint(const geometry_msgs::PointStamped& 
   joint_constraint.tolerance_below = M_PI;
   joint_constraint.weight = 0.5;
 
-  for (size_t i = 0; i < joint_names_.size(); ++i){
+  getJointNamesFromMoveGroup();
+
+  for (size_t i = 0; i < joint_names_.size(); ++i)
+  {
     joint_constraint.joint_name = joint_names_[i];
     constraints.joint_constraints.push_back(joint_constraint);
   }
