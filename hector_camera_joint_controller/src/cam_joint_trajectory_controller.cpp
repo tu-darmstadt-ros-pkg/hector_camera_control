@@ -71,12 +71,9 @@ TrackedJointManager::TrackedJointManager()
   model_.initParam("/robot_description");
 }
 
-TrackedJoint::TrackedJoint(const std::string& joint_name,
-             const std::string& topic,
-             const double lower_limit,
-             const double upper_limit,
-             const double reached_threshold,
-             ros::NodeHandle& nh)
+TrackedJoint::TrackedJoint(const std::string& joint_name, const std::string& topic, const double lower_limit,
+                           const double upper_limit, const double reached_threshold, const bool keep_fixed,
+                           ros::NodeHandle& nh)
 {
   this->state_.name.resize(1);
   this->state_.position.resize(1);
@@ -90,8 +87,11 @@ TrackedJoint::TrackedJoint(const std::string& joint_name,
   this->lower_limit_ = lower_limit;
   this->upper_limit_ = upper_limit;
 
+  this->keep_fixed = keep_fixed;
+
   ROS_INFO_STREAM("Added joint " << joint_name << " topic: " << topic << " lowerl: " << lower_limit
-                                 << " upperl: " << upper_limit << " reached thresh: " << reached_threshold);
+                                 << " upperl: " << upper_limit << " reached thresh: " << reached_threshold
+                                 << " keep fixed: " << keep_fixed);
 
   joint_target_pub_ = nh.advertise<std_msgs::Float64>("/" + topic,1,false);
 }
@@ -144,13 +144,17 @@ void TrackedJointManager::addJoint(const std::string& ns, ros::NodeHandle& nh)
   double min_val;
   double max_val;
   double reached_threshold;
+  bool keep_fixed;
+
   nh.getParam(ns + "/name", joint_name);
   nh.getParam(ns + "/topic", topic);
   nh.param(ns +"/reached_threshold", reached_threshold, 0.05);
+  nh.param(ns + "/keep_fixed", keep_fixed, false);
 
   auto joint_limits = model_.getJoint(joint_name)->limits;
 
-  this->addJoint(TrackedJoint(joint_name, topic, joint_limits->lower, joint_limits->upper, reached_threshold, nh));
+  this->addJoint(
+      TrackedJoint(joint_name, topic, joint_limits->lower, joint_limits->upper, reached_threshold, keep_fixed, nh));
 }
 
 void TrackedJointManager::addJoint(const TrackedJoint& joint)
@@ -170,9 +174,9 @@ void TrackedJointManager::updateState(const sensor_msgs::JointState& msg)
 bool TrackedJointManager::reachedTarget()
 {
   // Only check the state of pan and tilt joint
-  for (size_t i = 0; i < std::min(2, static_cast<int>(tracked_joints_.size())); ++i)
+  for (size_t i = 0; i < getNumJoints(); ++i)
   {
-    if (!tracked_joints_[i].reachedTarget())
+    if (!tracked_joints_[i].keep_fixed && !tracked_joints_[i].reachedTarget())
     {
       return false;
     }
@@ -189,33 +193,21 @@ struct CostFunctor
   {
   }
 
-  bool operator()(const double* const x, double* residual) const
+  bool operator()(double const* const* x, double* residual) const
   {
     // Compute forward kinematics
     KDL::ChainFkSolverPos_recursive fk_solver(chain_);
     KDL::JntArray joint_positions(chain_.getNrOfJoints());
 
-    int non_joint_counter = 0;
-    for (unsigned int i = 0; i < chain_.getNrOfSegments(); ++i)
+    for (unsigned int i = 0; i < chain_.getNrOfJoints(); ++i)
     {
-      for (unsigned int j = 0; j < tracked_joints_.size(); j++)
+      if (tracked_joints_[i].keep_fixed)
       {
-        if (tracked_joints_[j].state_.name[0] == chain_.getSegment(i).getJoint().getName())
-        {
-          if (j < 2)
-          {
-            joint_positions(i - non_joint_counter) = normalize_angle(x[j]);
-          }
-          else
-          {
-            joint_positions(i - non_joint_counter) = tracked_joints_[j].state_.position[0];
-          }
-          break;
-        }
+        joint_positions(i) = tracked_joints_[i].state_.position[0];
       }
-      if (chain_.getSegment(i).getJoint().getType() == KDL::Joint::JointType::None)
+      else
       {
-        non_joint_counter++;
+        joint_positions(i) = normalize_angle(x[0][i]);
       }
     }
 
@@ -326,7 +318,7 @@ void CamJointTrajControl::Init()
   pnh_.getParam("has_elevating_mast", has_elevating_mast_);
 
   pnh_.getParam("use_direct_position_commands", use_direct_position_commands_);
-  use_direct_position_commands_ = true;
+
   direct_position_command_default_wait_time_ = 4.0;
   pnh_.getParam("direct_position_command_default_wait_time", direct_position_command_default_wait_time_);
   
@@ -351,48 +343,43 @@ void CamJointTrajControl::Init()
 
   controller_nh_ = ros::NodeHandle(controller_namespace_);
 
-  if (use_direct_position_commands_){
-    //servo_pub_1_ = nh_.advertise<std_msgs::Float64>("servo1_command", 1);
-    //servo_pub_2_ = nh_.advertise<std_msgs::Float64>("servo2_command", 1);
+  joint_state_sub_ = nh_.subscribe("joint_states", 1, &CamJointTrajControl::jointStatesCallback, this);
 
-    joint_state_sub_ = nh_.subscribe("joint_states", 1, &CamJointTrajControl::jointStatesCallback, this);
+  if (pnh_.hasParam("joint0/name"))
+  {
+    joint_manager_.addJoint("joint0", pnh_);
+  }
 
-    if (pnh_.hasParam("joint0/name")){
-      joint_manager_.addJoint("joint0", pnh_);
-    }
+  if (pnh_.hasParam("joint1/name"))
+  {
+    joint_manager_.addJoint("joint1", pnh_);
+  }
 
-    if (pnh_.hasParam("joint1/name")){
-      joint_manager_.addJoint("joint1", pnh_);
-    }
+  if (pnh_.hasParam("joint2/name"))
+  {
+    joint_manager_.addJoint("joint2", pnh_);
+  }
 
-    if (pnh_.hasParam("joint2/name"))
-    {
-      joint_manager_.addJoint("joint2", pnh_);
-    }
+  if (pnh_.hasParam("joint3/name"))
+  {
+    joint_manager_.addJoint("joint3", pnh_);
+  }
 
-    if (pnh_.hasParam("joint3/name"))
-    {
-      joint_manager_.addJoint("joint3", pnh_);
-    }
-
-    /*
-    if (has_elevating_mast_){
-      joint_manager_.addJoint(TrackedJoint("mast_prismatic_joint",
-                                           "/position_controller/command",
-                                           0.0,
-                                           0.83,
-                                           nh_));
-    }
-    */
-
-  }else{
+  if (!use_direct_position_commands_)
+  {
     // Actions, subscribers
-    joint_traj_client_.reset(new actionlib::ActionClient<control_msgs::FollowJointTrajectoryAction>(controller_nh_.getNamespace() + "/follow_joint_trajectory"));
-    joint_trajectory_action_status_sub_ = controller_nh_.subscribe("follow_joint_trajectory/status", 1, &CamJointTrajControl::trajActionStatusCallback, this);
+    joint_traj_client_.reset(new actionlib::ActionClient<control_msgs::FollowJointTrajectoryAction>(
+        controller_nh_.getNamespace() + "/follow_joint_trajectory"));
 
-    if (move_group_name_.empty()){
+    joint_trajectory_action_status_sub_ = controller_nh_.subscribe(
+        "follow_joint_trajectory/status", 1, &CamJointTrajControl::trajActionStatusCallback, this);
+
+    if (move_group_name_.empty())
+    {
       getJointNamesFromController(controller_nh_);
-    }else{
+    }
+    else
+    {
       getJointNamesFromMoveGroup();
     }
   }
@@ -432,10 +419,7 @@ void CamJointTrajControl::getJointNamesFromMoveGroup()
     exit(0);
   }
   joint_names_ = group->getJointModelNames();
-  if (joint_names_.size() != 2) {
-    ROS_FATAL_STREAM("The move group '" << move_group_name_ << "' does not contain the correct amount of joints. Expected: 2; Found: " << joint_names_.size() << ". Exiting.");
-    exit(0);
-  }
+
   for (unsigned int i = 0; i < joint_names_.size(); ++i){
     ROS_INFO("[cam joint ctrl] Joint %d : %s", static_cast<int>(i), joint_names_[i].c_str());
   }
@@ -610,17 +594,79 @@ bool CamJointTrajControl::ComputeDirectionForPoint(const geometry_msgs::PointSta
   return true;
 }
 
-void CamJointTrajControl::SendJointCommand(const Eigen::Vector3d& joint_values)
+void CamJointTrajControl::SendJointCommand(const double* joint_values)
 {
-
-  joint_manager_.getJoint(0).setTarget(joint_values[0]);
-
-  if ((joint_manager_.getNumJoints() > 1) && !this->has_elevating_mast_)
+  for (int i = 0; i < joint_manager_.getNumJoints(); i++)
   {
-    joint_manager_.getJoint(1).setTarget(joint_values[1]);
+    if (!joint_manager_.getJoint(i).keep_fixed)
+      joint_manager_.getJoint(i).setTarget(joint_values[i]);
   }
 
   return;
+}
+
+bool CamJointTrajControl::SendTrajectoryCommand(const double* joint_values)
+{
+  moveit_msgs::GetMotionPlanRequest req;
+  moveit_msgs::GetMotionPlanResponse res;
+
+  moveit_msgs::Constraints constraints;
+  constraints.name = "goal";
+
+  moveit_msgs::JointConstraint joint_constraint;
+  joint_constraint.weight = 0.5;
+  joint_constraint.tolerance_above = 0.001;
+  joint_constraint.tolerance_below = 0.001;
+
+  for (size_t i = 0; i < joint_names_.size(); ++i)
+  {
+    joint_constraint.joint_name = joint_names_[i];
+    if (joint_manager_.getJoint(i).keep_fixed)
+    {
+      joint_constraint.position = joint_manager_.getJoint(i).state_.position[0];
+    }
+    else
+    {
+      joint_constraint.position = joint_values[i];
+    }
+
+    constraints.joint_constraints.push_back(joint_constraint);
+  }
+
+  req.motion_plan_request.group_name = move_group_name_;
+  req.motion_plan_request.goal_constraints.push_back(constraints);
+  req.motion_plan_request.allowed_planning_time = 0.2;
+  req.motion_plan_request.max_velocity_scaling_factor = 1.0;
+
+  bool plan_retrieval_success = this->get_plan_service_client_.call(req, res);
+
+  if (!plan_retrieval_success)
+  {
+    ROS_WARN("[cam joint ctrl] Planning service returned false, aborting");
+    return false;
+  }
+
+  if (!(res.motion_plan_response.error_code.val == moveit_msgs::MoveItErrorCodes::SUCCESS))
+  {
+    ROS_WARN("[cam joint ctrl] Plan result error code is %d, aborting.",
+             static_cast<int>(res.motion_plan_response.error_code.val));
+    return false;
+  }
+
+  ROS_DEBUG("[cam joint ctrl] Plan retrieved successfully");
+
+  control_msgs::FollowJointTrajectoryGoal goal;
+
+  goal.goal_time_tolerance = ros::Duration(1.0);
+
+  goal.trajectory = res.motion_plan_response.trajectory.joint_trajectory;
+  goal.trajectory.header.stamp = ros::Time::now();
+
+  last_plan_time_ = ros::Time::now();
+
+  gh_list_.push_back(joint_traj_client_->sendGoal(goal, boost::bind(&CamJointTrajControl::transitionCb, this, _1)));
+
+  return true;
 }
 
 bool CamJointTrajControl::ComputeJointCommand(const geometry_msgs::QuaternionStamped& command_to_use, Eigen::Vector3d& joint_angles)
@@ -719,52 +765,6 @@ bool CamJointTrajControl::ComputeJointCommand(const geometry_msgs::QuaternionSta
   //std::cout << "\nangles:\n" << angles << "\n";
   //std::cout << "\nangles:\n" << desAngle << "\n" << "roll_diff: " << roll << " pitch_diff: " <<  pitch << " yaw diff:" << yaw << "\n";
   //std::cout << "\nangles:"  << " pitch_diff: " <<  error_pitch << " yaw diff:" << error_yaw << "\n";
-
-  if (!use_direct_position_commands_){
-      
-    control_msgs::FollowJointTrajectoryGoal goal;
-      
-    goal.goal_time_tolerance = ros::Duration(1.0);
-    //goal.goal.path_tolerance = 1.0;
-    //goal.goal.trajectory.joint_names
-
-    size_t num_joints = joint_names_.size();
-
-    goal.trajectory.joint_names = joint_names_;
-    goal.trajectory.points.resize(1);
-
-    goal.trajectory.points[0].positions.resize(num_joints);
-    goal.trajectory.points[0].velocities.resize(num_joints);
-    goal.trajectory.points[0].accelerations.resize(num_joints);
-
-    for (size_t i = 0; i < num_joints; ++i){
-      goal.trajectory.points[0].positions[i] = desAngle[i];
-      goal.trajectory.points[0].velocities[i] = 0.0;
-      goal.trajectory.points[0].accelerations[i] = 0.0;
-    }
-
-    if (max_axis_speed_ != 0.0){
-      double max_diff = 0.0;
-      
-      if (num_joints == 1){
-        max_diff = std::abs(diff_1);
-      }else{
-        max_diff = std::max(std::abs(diff_1), std::abs(diff_2));  
-      }
-    
-      double target_time = max_diff / max_axis_speed_;
-      
-      target_time = std::max (target_time, command_goal_time_from_start_);
-      
-      goal.trajectory.points[0].time_from_start = ros::Duration(target_time);
-      
-    }else{      
-      goal.trajectory.points[0].time_from_start = ros::Duration(command_goal_time_from_start_);
-    }
-
-    gh_list_.push_back(joint_traj_client_->sendGoal(goal, boost::bind(&CamJointTrajControl::transitionCb, this, _1)));
-    return false;
-  }
 
   joint_angles = desAngle;
 
@@ -918,8 +918,17 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
           this->stopControllerTrajExecution();
         }
       }else{
-
-        this->aimAtPOI(this->lookat_point_);
+        if (!this->aimAtPOI(this->lookat_point_))
+        {
+          if (look_at_server_->isActive())
+          {
+            ROS_INFO("Attempting to plan lookat failed multiple times, aborting.");
+            look_at_server_->setAborted();
+            control_mode_ = MODE_OFF;
+            this->stopControllerTrajExecution();
+          }
+          return;
+        }
 
         if (has_elevating_mast_){
           double prismatic_desired;
@@ -963,7 +972,7 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
             Eigen::Vector3d joint_angles;
             if(this->ComputeJointCommand(command_quat, joint_angles))
             {
-              this->SendJointCommand(joint_angles);
+              this->SendJointCommand(joint_angles.data());
             }
           }
         }
@@ -999,7 +1008,7 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
         Eigen::Vector3d joint_angles;
         if(this->ComputeJointCommand(command_to_use, joint_angles))
         {
-          this->SendJointCommand(joint_angles);
+          this->SendJointCommand(joint_angles.data());
         }
 
       }
@@ -1016,7 +1025,7 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
         Eigen::Vector3d joint_angles;
         if(this->ComputeJointCommand(*latest_orientation_cmd_, joint_angles))
         {
-          this->SendJointCommand(joint_angles);
+          this->SendJointCommand(joint_angles.data());
         };
         latest_orientation_cmd_.reset();
         joint_trajectory_preempted_ = false;
@@ -1039,10 +1048,10 @@ bool CamJointTrajControl::aimAtPOI(const geometry_msgs::PointStamped& poi_positi
   ROS_DEBUG("Precomputed tilt angle: %f", pre_angles(1));
 
   // The variable to solve for with its initial precomputed value respecting joint limits
-  const int n = 2;
+  const int n = joint_manager_.getNumJoints();
   double desired_angles[n];
 
-  for (int i = 0; i < n; i++)
+  for (int i = 0; i < 2; i++)
   {
     desired_angles[i] = std::max(std::min(pre_angles(i), joint_manager_.getJoint(i).upper_limit_),
                                  joint_manager_.getJoint(i).lower_limit_);
@@ -1072,7 +1081,7 @@ bool CamJointTrajControl::aimAtPOI(const geometry_msgs::PointStamped& poi_positi
   KDL::Vector poi(poi_in_reference_frame.point.x, poi_in_reference_frame.point.y, poi_in_reference_frame.point.z);
 
   // Number of optimization attempts
-  int num_attempts = 20;
+  int num_attempts = 10;
 
   // Variables to store the best result
   double best_residual = std::numeric_limits<double>::max();
@@ -1088,40 +1097,32 @@ bool CamJointTrajControl::aimAtPOI(const geometry_msgs::PointStamped& poi_positi
     // Initialize desired_angles with different initial values for each attempt
     for (int i = 0; i < n && attempt > 0; i++)
     {
-      std::uniform_real_distribution<double> distribution(joint_manager_.getJoint(i).lower_limit_,
-                                                          joint_manager_.getJoint(i).upper_limit_);
-      desired_angles[i] = distribution(generator);
-    }
-
-    ceres::CostFunction* cost_function = new ceres::NumericDiffCostFunction<CostFunctor, ceres::CENTRAL, 1, 2>(
-        new CostFunctor(chain, poi, joint_manager_.tracked_joints_));
-
-    problem.AddResidualBlock(cost_function, nullptr, desired_angles);
-
-    // Add a virtual continuous manifold if joint is continuous
-    if (joint_manager_.getJoint(0).lower_limit_ > -3.14 || joint_manager_.getJoint(0).upper_limit_ < 3.14)
-    {
-      problem.SetParameterLowerBound(desired_angles, 0, joint_manager_.getJoint(0).lower_limit_);
-      problem.SetParameterUpperBound(desired_angles, 0, joint_manager_.getJoint(0).upper_limit_);
-    }
-    else
-    {
-      problem.SetParameterLowerBound(desired_angles, 0, -2.0 * M_PI);
-      problem.SetParameterUpperBound(desired_angles, 0, 2.0 * M_PI);
-    }
-
-    if ((joint_manager_.getNumJoints() > 1) && !this->has_elevating_mast_)
-    {
-      if (joint_manager_.getJoint(1).lower_limit_ > -3.14 || joint_manager_.getJoint(1).upper_limit_ < 3.14)
+      if (joint_manager_.getJoint(i).keep_fixed)
       {
-        problem.SetParameterLowerBound(desired_angles, 1, joint_manager_.getJoint(1).lower_limit_);
-        problem.SetParameterUpperBound(desired_angles, 1, joint_manager_.getJoint(1).upper_limit_);
+        desired_angles[i] = joint_manager_.getJoint(i).state_.position[0];
       }
       else
       {
-        problem.SetParameterLowerBound(desired_angles, 1, -2.0 * M_PI);
-        problem.SetParameterUpperBound(desired_angles, 1, 2.0 * M_PI);
+        std::uniform_real_distribution<double> distribution(joint_manager_.getJoint(i).lower_limit_,
+                                                            joint_manager_.getJoint(i).upper_limit_);
+        desired_angles[i] = distribution(generator);
       }
+    }
+
+    ceres::DynamicNumericDiffCostFunction<CostFunctor>* cost_function =
+        new ceres::DynamicNumericDiffCostFunction<CostFunctor>(
+            new CostFunctor(chain, poi, joint_manager_.tracked_joints_));
+
+    cost_function->AddParameterBlock(n);
+    cost_function->SetNumResiduals(1);
+
+    problem.AddResidualBlock(cost_function, nullptr, desired_angles);
+
+    // Add a virtual continuous manifold if joint is continuous, otherwise use joint limits
+    for (int i = 0; i < n; i++)
+    {
+      problem.SetParameterLowerBound(desired_angles, i, joint_manager_.getJoint(i).lower_limit_);
+      problem.SetParameterUpperBound(desired_angles, i, joint_manager_.getJoint(i).upper_limit_);
     }
 
     options.minimizer_type = ceres::TRUST_REGION;
@@ -1132,7 +1133,7 @@ bool CamJointTrajControl::aimAtPOI(const geometry_msgs::PointStamped& poi_positi
     options.parameter_tolerance = 1e-8;
     options.function_tolerance = 1e-8;
 
-    options.max_num_iterations = 100;
+    options.max_num_iterations = 200;
 
     ceres::Solver::Summary summary;
     ceres::Solve(options, &problem, &summary);
@@ -1141,23 +1142,34 @@ bool CamJointTrajControl::aimAtPOI(const geometry_msgs::PointStamped& poi_positi
     {
       // Store the best result
       best_residual = summary.final_cost;
-      std::copy(std::begin(desired_angles), std::end(desired_angles), std::begin(best_result));
+      for (int i = 0; i < n; i++)
+      {
+        best_result[i] = desired_angles[i];
+      }
     }
 
     ROS_DEBUG_STREAM("Ceres report: " << summary.FullReport());
 
-    // If accuracy good enough, break early
-    if (best_residual < 0.0001)
+    // If accuracy good enough, break early: 0.5*(0.1/180*pi)^2 = 0.00000152308
+    if (best_residual < 0.00000152308)
     {
       break;
     }
   }
 
   ROS_DEBUG("Computed pan angle : %f", best_result[0]);
-  ROS_DEBUG("Computed tilt angle: %f", best_result[1]);
+  ROS_DEBUG("Computed residual: %f", best_residual);
 
-  Eigen::Vector3d optimized_joint_angles(best_result[0], best_result[1], 0.0);
-  SendJointCommand(optimized_joint_angles);
+  // TODO: Check deviation to goal here, potentially abort
+
+  if (use_direct_position_commands_)
+  {
+    SendJointCommand(best_result);
+  }
+  else
+  {
+    SendTrajectoryCommand(best_result);
+  }
 
   return true;
 }
@@ -1315,18 +1327,6 @@ void CamJointTrajControl::lookAtGoalCallback()
     lookat_oneshot_ = goal->look_at_target.no_continuous_tracking;
     control_mode_ = MODE_LOOKAT;
     ROS_INFO("Starting LookAt Action with: no_continuous_tracking: %d", goal->look_at_target.no_continuous_tracking);
-
-    if (use_direct_position_commands_){
-      /*
-      reached_lookat_target_timer_ = nh_.createTimer(
-            ros::Duration(direct_position_command_default_wait_time_),
-            &CamJointTrajControl::directPointingTimerCallback,
-            this,
-            true,
-            true);
-            */
-
-    }
 
     new_goal_received_ = true;
   }
@@ -1487,3 +1487,4 @@ int main(int argc, char **argv)
 
     return 0;
 }
+
