@@ -87,7 +87,8 @@ public:
 
   double reached_threshold_;
 
-  bool keep_fixed;
+  bool keep_fixed_;
+  double fixed_value_;
 
   ros::Publisher joint_target_pub_;
 };
@@ -196,6 +197,7 @@ private:
   robot_model::RobotModelPtr moveit_robot_model_;
   robot_state::RobotStatePtr moveit_robot_state_;
   std::vector<std::string> joint_names_;
+  std::string lookout_pose_name_;
 
   TrackedJointManager joint_manager_;
 

@@ -87,7 +87,8 @@ TrackedJoint::TrackedJoint(const std::string& joint_name, const std::string& top
   this->lower_limit_ = lower_limit;
   this->upper_limit_ = upper_limit;
 
-  this->keep_fixed = keep_fixed;
+  this->keep_fixed_ = keep_fixed;
+  fixed_value_ = 0.0;
 
   ROS_INFO_STREAM("Added joint " << joint_name << " topic: " << topic << " lowerl: " << lower_limit
                                  << " upperl: " << upper_limit << " reached thresh: " << reached_threshold
@@ -176,7 +177,7 @@ bool TrackedJointManager::reachedTarget()
   // Only check the state of pan and tilt joint
   for (size_t i = 0; i < getNumJoints(); ++i)
   {
-    if (!tracked_joints_[i].keep_fixed && !tracked_joints_[i].reachedTarget())
+    if (!tracked_joints_[i].reachedTarget())
     {
       return false;
     }
@@ -201,9 +202,9 @@ struct CostFunctor
 
     for (unsigned int i = 0; i < chain_.getNrOfJoints(); ++i)
     {
-      if (tracked_joints_[i].keep_fixed)
+      if (tracked_joints_[i].keep_fixed_)
       {
-        joint_positions(i) = tracked_joints_[i].state_.position[0];
+        joint_positions(i) = tracked_joints_[i].fixed_value_;
       }
       else
       {
@@ -324,6 +325,8 @@ void CamJointTrajControl::Init()
   
   pnh_.getParam("use_planning_based_pointing", use_planning_based_pointing_);
 
+  pnh_.param<std::string>("lookout_pose_name", lookout_pose_name_, "lookout");
+
   if (type_string == "xyz"){
     rotationConv = xyz;
   }else{
@@ -419,9 +422,16 @@ void CamJointTrajControl::getJointNamesFromMoveGroup()
     exit(0);
   }
   joint_names_ = group->getJointModelNames();
+  std::map<std::string, double> group_joint_values;
+  group->getVariableDefaultPositions(lookout_pose_name_, group_joint_values);
 
   for (unsigned int i = 0; i < joint_names_.size(); ++i){
     ROS_INFO("[cam joint ctrl] Joint %d : %s", static_cast<int>(i), joint_names_[i].c_str());
+
+    if (joint_manager_.getJoint(i).keep_fixed_)
+    {
+      joint_manager_.getJoint(i).fixed_value_ = group_joint_values[joint_manager_.getJoint(i).state_.name[0]];
+    }
   }
 }
 
@@ -598,8 +608,14 @@ void CamJointTrajControl::SendJointCommand(const double* joint_values)
 {
   for (int i = 0; i < joint_manager_.getNumJoints(); i++)
   {
-    if (!joint_manager_.getJoint(i).keep_fixed)
+    if (joint_manager_.getJoint(i).keep_fixed_)
+    {
+      joint_manager_.getJoint(i).setTarget(joint_manager_.getJoint(i).fixed_value_);
+    }
+    else
+    {
       joint_manager_.getJoint(i).setTarget(joint_values[i]);
+    }
   }
 
   return;
@@ -621,9 +637,9 @@ bool CamJointTrajControl::SendTrajectoryCommand(const double* joint_values)
   for (size_t i = 0; i < joint_names_.size(); ++i)
   {
     joint_constraint.joint_name = joint_names_[i];
-    if (joint_manager_.getJoint(i).keep_fixed)
+    if (joint_manager_.getJoint(i).keep_fixed_)
     {
-      joint_constraint.position = joint_manager_.getJoint(i).state_.position[0];
+      joint_constraint.position = joint_manager_.getJoint(i).fixed_value_;
     }
     else
     {
@@ -1097,9 +1113,9 @@ bool CamJointTrajControl::aimAtPOI(const geometry_msgs::PointStamped& poi_positi
     // Initialize desired_angles with different initial values for each attempt
     for (int i = 0; i < n && attempt > 0; i++)
     {
-      if (joint_manager_.getJoint(i).keep_fixed)
+      if (joint_manager_.getJoint(i).keep_fixed_)
       {
-        desired_angles[i] = joint_manager_.getJoint(i).state_.position[0];
+        desired_angles[i] = joint_manager_.getJoint(i).fixed_value_;
       }
       else
       {
