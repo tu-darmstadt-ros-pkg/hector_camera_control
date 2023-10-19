@@ -71,12 +71,8 @@ struct TargetPointPatternElement{
 
 class TrackedJoint{
 public:
-  TrackedJoint(const std::string& joint_name,
-               const std::string& topic,
-               const double lower_limit,
-               const double upper_limit,
-               const double reached_threshold,
-               ros::NodeHandle& nh);
+  TrackedJoint(const std::string& joint_name, const std::string& topic, const double lower_limit,
+               const double upper_limit, const double reached_threshold, const bool keep_fixed, ros::NodeHandle& nh);
   void updateState(const sensor_msgs::JointState& msg);
 
   void setTarget(const double position);
@@ -90,6 +86,9 @@ public:
   double upper_limit_;
 
   double reached_threshold_;
+
+  bool keep_fixed_;
+  double fixed_value_;
 
   ros::Publisher joint_target_pub_;
 };
@@ -133,7 +132,8 @@ private:
   bool ComputeHeightForPoint(const geometry_msgs::PointStamped& lookat_point, double& height);
 
   bool ComputeJointCommand(const geometry_msgs::QuaternionStamped& command_to_use, Eigen::Vector3d& joint_values);
-  void SendJointCommand(const Eigen::Vector3d& joint_values);
+  void SendJointCommand(const double* joint_values);
+  bool SendTrajectoryCommand(const double* joint_values);
   bool aimAtPOI(const geometry_msgs::PointStamped& poi_position);
 
   void transitionCb(actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> gh);
@@ -197,6 +197,7 @@ private:
   robot_model::RobotModelPtr moveit_robot_model_;
   robot_state::RobotStatePtr moveit_robot_state_;
   std::vector<std::string> joint_names_;
+  std::string lookout_pose_name_;
 
   TrackedJointManager joint_manager_;
 
@@ -241,3 +242,4 @@ private:
 }
 
 #endif
+
