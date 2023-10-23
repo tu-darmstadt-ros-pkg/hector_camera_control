@@ -208,7 +208,7 @@ struct CostFunctor
       }
       else
       {
-        joint_positions(i) = normalize_angle(x[0][i]);
+        joint_positions(i) = x[0][i];
       }
     }
 
@@ -1097,7 +1097,7 @@ bool CamJointTrajControl::aimAtPOI(const geometry_msgs::PointStamped& poi_positi
   KDL::Vector poi(poi_in_reference_frame.point.x, poi_in_reference_frame.point.y, poi_in_reference_frame.point.z);
 
   // Number of optimization attempts
-  int num_attempts = 10;
+  int num_attempts = 20;
 
   // Variables to store the best result
   double best_residual = std::numeric_limits<double>::max();
