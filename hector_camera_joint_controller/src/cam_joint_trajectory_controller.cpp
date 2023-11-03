@@ -503,13 +503,13 @@ void CamJointTrajControl::getJointValuesForPose(std::string pose_name,
 // Reset
 void CamJointTrajControl::Reset()
 {
+  int n = joint_manager_.getNumJoints();
+  double joint_values[n];
+
   if (!use_direct_position_commands_)
   {
     std::map<std::string, double> group_joint_values;
     getJointValuesForPose("transport", group_joint_values);
-
-    int n = joint_manager_.getNumJoints();
-    double joint_values[n];
 
     for (int i = 0; i < n; i++)
     {
@@ -520,8 +520,8 @@ void CamJointTrajControl::Reset()
   }
   else
   {
-    // Reset orientation
-    latest_orientation_cmd_.reset();
+    std::fill(joint_values, joint_values + n, 0.0);
+    SendJointCommand(joint_values);
   }
 }
 
@@ -904,7 +904,14 @@ void CamJointTrajControl::panTiltVelocityCallback(const robotnik_msgs::ptz::Cons
     }
   }
 
-  this->SendTrajectoryCommand(joint_values);
+  if (use_direct_position_commands_)
+  {
+    this->SendJointCommand(joint_values);
+  }
+  else
+  {
+    this->SendTrajectoryCommand(joint_values);
+  }
 }
 
 // NEW: Store the velocities from the ROS message
