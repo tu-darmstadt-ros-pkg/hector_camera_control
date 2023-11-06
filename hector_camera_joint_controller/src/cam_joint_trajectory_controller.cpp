@@ -113,7 +113,7 @@ void TrackedJoint::updateState(const sensor_msgs::JointState& msg)
 
 void TrackedJoint::setTarget(const double position)
 {
-  this->desired_pos_ = position;
+  desired_pos_ = std::max(lower_limit_, std::min(position, upper_limit_));
 
   std_msgs::Float64 msg;
   msg.data = this->desired_pos_;
@@ -251,9 +251,9 @@ CamJointTrajControl::CamJointTrajControl()
   , lookat_oneshot_(true)
   , use_direct_position_commands_(false)
   , new_goal_received_(false)
-  , pattern_index_ (0)
+  , pattern_index_(0)
   , use_planning_based_pointing_(true)
-  , disable_orientation_camera_command_input_(false)
+  , enable_velocity_control_(false)
   , stabilize_default_look_dir_frame_(false)
   , last_plan_time_(ros::Time(0))
   , pitch_axis_factor_(1.0)
@@ -388,14 +388,10 @@ void CamJointTrajControl::Init()
   }
 
   control_timer = nh_.createTimer(ros::Duration(control_loop_period_), &CamJointTrajControl::controlTimerCallback, this, false, true);
-  
-  pnh_.getParam("disable_orientation_camera_command_input", disable_orientation_camera_command_input_);
 
-  if (!disable_orientation_camera_command_input_)  // Use quaternion as orientation input
-  {
-    sub_ = nh_.subscribe("/camera/command", 1, &CamJointTrajControl::cmdCallback, this);
-  }
-  else  // Use relative movement as input
+  pnh_.getParam("enable_velocity_control", enable_velocity_control_);
+
+  if (enable_velocity_control_)  // Use naive velocity controller
   {
     pan_tilt_sub_ = nh_.subscribe("/pan_tilt_vel", 1, &CamJointTrajControl::panTiltVelocityCallback, this);
   }

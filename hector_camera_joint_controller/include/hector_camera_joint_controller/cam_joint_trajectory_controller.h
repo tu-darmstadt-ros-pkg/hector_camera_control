@@ -243,7 +243,7 @@ private:
   bool has_elevating_mast_;
   
   bool use_planning_based_pointing_;
-  bool disable_orientation_camera_command_input_;
+  bool enable_velocity_control_;
 };
 
 }
