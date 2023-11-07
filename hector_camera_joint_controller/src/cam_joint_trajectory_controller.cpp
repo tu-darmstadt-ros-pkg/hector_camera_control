@@ -882,6 +882,11 @@ void CamJointTrajControl::panTiltVelocityCallback(const robotnik_msgs::ptz::Cons
     return;
   }
 
+  if (msg->pan == 0.0 && msg->tilt == 0.0)
+  {
+    return;
+  }
+
   int n = joint_manager_.getNumJoints();
   double joint_values[n];
 
