@@ -664,10 +664,11 @@ bool CamJointTrajControl::SendTrajectoryCommand(const double* joint_values)
   joint_constraint.tolerance_above = 0.001;
   joint_constraint.tolerance_below = 0.001;
 
-  for (size_t i = 0; i < joint_names_.size(); ++i)
+  for (size_t i = 0; i < joint_manager_.getNumJoints(); ++i)
   {
-    joint_constraint.joint_name = joint_names_[i];
+    joint_constraint.joint_name = joint_manager_.getJoint(i).state_.name[0];
     joint_constraint.position = joint_values[i];
+    joint_manager_.getJoint(i).desired_pos_ = joint_values[i];
 
     constraints.joint_constraints.push_back(joint_constraint);
   }
@@ -900,7 +901,16 @@ void CamJointTrajControl::panTiltVelocityCallback(const robotnik_msgs::ptz::Cons
     }
     else
     {
-      joint_values[i] = joint_manager_.getJoint(i).state_.position[0] + offset;
+      if (std::abs(joint_manager_.getJoint(i).state_.position[0] - joint_manager_.getJoint(i).desired_pos_) <
+          2 * std::abs(offset))
+      {
+        joint_values[i] = joint_manager_.getJoint(i).desired_pos_ + offset;
+      }
+      else
+      {
+        joint_values[i] = joint_manager_.getJoint(i).state_.position[0] + offset;
+      }
+
       offset = msg->tilt;
     }
   }
