@@ -113,7 +113,7 @@ void TrackedJoint::updateState(const sensor_msgs::JointState& msg)
 
 void TrackedJoint::setTarget(const double position)
 {
-  this->desired_pos_ = position;
+  desired_pos_ = std::max(lower_limit_, std::min(position, upper_limit_));
 
   std_msgs::Float64 msg;
   msg.data = this->desired_pos_;
@@ -251,9 +251,9 @@ CamJointTrajControl::CamJointTrajControl()
   , lookat_oneshot_(true)
   , use_direct_position_commands_(false)
   , new_goal_received_(false)
-  , pattern_index_ (0)
+  , pattern_index_(0)
   , use_planning_based_pointing_(true)
-  , disable_orientation_camera_command_input_(false)
+  , enable_velocity_control_(false)
   , stabilize_default_look_dir_frame_(false)
   , last_plan_time_(ros::Time(0))
   , pitch_axis_factor_(1.0)
@@ -388,11 +388,12 @@ void CamJointTrajControl::Init()
   }
 
   control_timer = nh_.createTimer(ros::Duration(control_loop_period_), &CamJointTrajControl::controlTimerCallback, this, false, true);
-  
-  pnh_.getParam("disable_orientation_camera_command_input", disable_orientation_camera_command_input_);
-  
-  if (!disable_orientation_camera_command_input_){
-    sub_ = nh_.subscribe("/camera/command", 1, &CamJointTrajControl::cmdCallback, this);    
+
+  pnh_.getParam("enable_velocity_control", enable_velocity_control_);
+
+  if (enable_velocity_control_)  // Use naive velocity controller
+  {
+    pan_tilt_sub_ = nh_.subscribe("/pan_tilt_vel", 1, &CamJointTrajControl::panTiltVelocityCallback, this);
   }
 
   this->Reset();
@@ -411,21 +412,17 @@ void CamJointTrajControl::getJointNamesFromMoveGroup()
   // Load moveit robot model to retrieve joint names
   robot_model_loader::RobotModelLoader robot_model_loader("robot_description", false);
   moveit_robot_model_ = robot_model_loader.getModel();
+
   if (!moveit_robot_model_){
     ROS_FATAL_STREAM("Could not load robot model. Exiting.");
     exit(0);
   }
-  moveit_robot_state_ = std::make_shared<robot_state::RobotState>(moveit_robot_model_);
-  const robot_state::JointModelGroup* group = moveit_robot_state_->getJointModelGroup(move_group_name_);
-  if (!group) {
-    ROS_FATAL_STREAM("Could not find move group with name '" << move_group_name_ << "'. Exiting.");
-    exit(0);
-  }
-  joint_names_ = group->getJointModelNames();
-  std::map<std::string, double> group_joint_values;
-  group->getVariableDefaultPositions(lookout_pose_name_, group_joint_values);
 
-  for (unsigned int i = 0; i < joint_names_.size(); ++i){
+  std::map<std::string, double> group_joint_values;
+  this->getJointValuesForPose(lookout_pose_name_, group_joint_values);
+
+  for (unsigned int i = 0; i < joint_names_.size(); ++i)
+  {
     ROS_INFO("[cam joint ctrl] Joint %d : %s", static_cast<int>(i), joint_names_[i].c_str());
 
     if (joint_manager_.getJoint(i).keep_fixed_)
@@ -484,11 +481,44 @@ void CamJointTrajControl::getJointNamesFromController(ros::NodeHandle& nh)
   }while (!retrieved_names);
 }
 
+void CamJointTrajControl::getJointValuesForPose(std::string pose_name,
+                                                std::map<std::string, double>& group_joint_values)
+{
+  moveit_robot_state_ = std::make_shared<robot_state::RobotState>(moveit_robot_model_);
+  const robot_state::JointModelGroup* group = moveit_robot_state_->getJointModelGroup(move_group_name_);
+  if (!group)
+  {
+    ROS_FATAL_STREAM("Could not find move group with name '" << move_group_name_ << "'. Exiting.");
+    exit(0);
+  }
+  joint_names_ = group->getJointModelNames();
+
+  group->getVariableDefaultPositions(pose_name, group_joint_values);
+}
+
 // Reset
 void CamJointTrajControl::Reset()
 {
-  // Reset orientation
-  latest_orientation_cmd_.reset();
+  int n = joint_manager_.getNumJoints();
+  double joint_values[n];
+
+  if (!use_direct_position_commands_)
+  {
+    std::map<std::string, double> group_joint_values;
+    getJointValuesForPose("transport", group_joint_values);
+
+    for (int i = 0; i < n; i++)
+    {
+      joint_values[i] = group_joint_values[joint_manager_.getJoint(i).state_.name[0]];
+    }
+
+    SendTrajectoryCommand(joint_values);
+  }
+  else
+  {
+    std::fill(joint_values, joint_values + n, 0.0);
+    SendJointCommand(joint_values);
+  }
 }
 
 bool CamJointTrajControl::planAndMoveToPoint(const geometry_msgs::PointStamped& point, double velocity_scaling_factor)
@@ -634,17 +664,11 @@ bool CamJointTrajControl::SendTrajectoryCommand(const double* joint_values)
   joint_constraint.tolerance_above = 0.001;
   joint_constraint.tolerance_below = 0.001;
 
-  for (size_t i = 0; i < joint_names_.size(); ++i)
+  for (size_t i = 0; i < joint_manager_.getNumJoints(); ++i)
   {
-    joint_constraint.joint_name = joint_names_[i];
-    if (joint_manager_.getJoint(i).keep_fixed_)
-    {
-      joint_constraint.position = joint_manager_.getJoint(i).fixed_value_;
-    }
-    else
-    {
-      joint_constraint.position = joint_values[i];
-    }
+    joint_constraint.joint_name = joint_manager_.getJoint(i).state_.name[0];
+    joint_constraint.position = joint_values[i];
+    joint_manager_.getJoint(i).desired_pos_ = joint_values[i];
 
     constraints.joint_constraints.push_back(joint_constraint);
   }
@@ -851,6 +875,56 @@ bool CamJointTrajControl::ComputeHeightForPoint(const geometry_msgs::PointStampe
   */
 }
 
+void CamJointTrajControl::panTiltVelocityCallback(const robotnik_msgs::ptz::ConstPtr& msg)
+{
+  if (!msg->relative)
+  {
+    Reset();
+    return;
+  }
+
+  if (msg->pan == 0.0 && msg->tilt == 0.0)
+  {
+    return;
+  }
+
+  int n = joint_manager_.getNumJoints();
+  double joint_values[n];
+
+  float offset = msg->pan;  // Assumes pan-tilt order
+
+  for (int i = 0; i < n; i++)
+  {
+    if (joint_manager_.getJoint(i).keep_fixed_)
+    {
+      joint_values[i] = joint_manager_.getJoint(i).fixed_value_;
+    }
+    else
+    {
+      if (std::abs(joint_manager_.getJoint(i).state_.position[0] - joint_manager_.getJoint(i).desired_pos_) <
+          2 * std::abs(offset))
+      {
+        joint_values[i] = joint_manager_.getJoint(i).desired_pos_ + offset;
+      }
+      else
+      {
+        joint_values[i] = joint_manager_.getJoint(i).state_.position[0] + offset;
+      }
+
+      offset = msg->tilt;
+    }
+  }
+
+  if (use_direct_position_commands_)
+  {
+    this->SendJointCommand(joint_values);
+  }
+  else
+  {
+    this->SendTrajectoryCommand(joint_values);
+  }
+}
+
 // NEW: Store the velocities from the ROS message
 void CamJointTrajControl::cmdCallback(const geometry_msgs::QuaternionStamped::ConstPtr& cmd_msg)
 {
@@ -1055,22 +1129,16 @@ bool CamJointTrajControl::aimAtPOI(const geometry_msgs::PointStamped& poi_positi
   geometry_msgs::QuaternionStamped command_quat;
   Eigen::Vector3d pre_angles;
 
-  if (this->ComputeDirectionForPoint(poi_position, command_quat))
-  {
-    this->ComputeJointCommand(command_quat, pre_angles);
-  }
-
-  ROS_DEBUG("Precomputed pan angle: %f", pre_angles(0));
-  ROS_DEBUG("Precomputed tilt angle: %f", pre_angles(1));
-
   // The variable to solve for with its initial precomputed value respecting joint limits
   const int n = joint_manager_.getNumJoints();
   double desired_angles[n];
 
-  for (int i = 0; i < 2; i++)
+  if (previous_computation_.size() == n)
   {
-    desired_angles[i] = std::max(std::min(pre_angles(i), joint_manager_.getJoint(i).upper_limit_),
-                                 joint_manager_.getJoint(i).lower_limit_);
+    for (int i = 0; i < n; i++)
+    {
+      desired_angles[i] = previous_computation_[i];
+    }
   }
 
   KDL::Chain chain;
@@ -1176,6 +1244,8 @@ bool CamJointTrajControl::aimAtPOI(const geometry_msgs::PointStamped& poi_positi
   ROS_DEBUG("Computed pan angle : %f", best_result[0]);
   ROS_DEBUG("Computed residual: %f", best_residual);
 
+  previous_computation_.clear();
+
   // TODO: Check deviation to goal here, potentially abort
 
   if (use_direct_position_commands_)
@@ -1184,6 +1254,14 @@ bool CamJointTrajControl::aimAtPOI(const geometry_msgs::PointStamped& poi_positi
   }
   else
   {
+    for (size_t i = 0; i < joint_names_.size(); ++i)
+    {
+      if (joint_manager_.getJoint(i).keep_fixed_)
+      {
+        best_result[i] = joint_manager_.getJoint(i).fixed_value_;
+      }
+      previous_computation_.push_back(best_result[i]);
+    }
     SendTrajectoryCommand(best_result);
   }
 

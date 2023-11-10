@@ -2,18 +2,19 @@ cmake_minimum_required(VERSION 2.8.3)
 project(hector_camera_joint_controller)
 
 find_package(catkin REQUIRED COMPONENTS
+  actionlib
+  cmake_modules
   control_msgs
   geometry_msgs
+  hector_perception_msgs
+  kdl_parser
+  moveit_core
+  moveit_msgs
+  moveit_ros_planning
+  robotnik_msgs
   roscpp
   tf
-  cmake_modules
-  actionlib
-  moveit_msgs
-  hector_perception_msgs
-  moveit_core
-  moveit_ros_planning
   tf_conversions
-  kdl_parser
   urdf
 )
 

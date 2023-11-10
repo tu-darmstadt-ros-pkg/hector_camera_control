@@ -26,6 +26,7 @@
   <depend>liborocos-kdl</depend>
   <depend>kdl_parser</depend>
   <depend>urdf</depend>
+  <depend>robotnik_msgs</depend>
 
   <export>
   </export>

@@ -51,6 +51,7 @@
 
 #include <control_msgs/FollowJointTrajectoryAction.h>
 #include <control_msgs/JointControllerState.h>
+#include <robotnik_msgs/ptz.h>
 
 #include <hector_perception_msgs/LookAtAction.h>
 
@@ -150,6 +151,9 @@ private:
   bool findPattern(const std::string& pattern_name);
 
   void cmdCallback(const geometry_msgs::QuaternionStamped::ConstPtr& cmd_msg);
+  void panTiltVelocityCallback(const robotnik_msgs::ptz::ConstPtr& msg);
+
+  void getJointValuesForPose(const std::string pose_name, std::map<std::string, double>& group_joint_values);
 
   double getClosestPointLineSegment(const Eigen::Vector3d& head,
                                     const Eigen::Vector3d& tail,
@@ -186,6 +190,8 @@ private:
 
   ros::Subscriber joint_state_sub_;
   ros::Subscriber sub_;
+  ros::Subscriber pan_tilt_sub_;
+
   tf::TransformListener* transform_listener_;
 
   ros::Publisher pattern_info_pub_;
@@ -203,6 +209,7 @@ private:
 
   KDL::Tree tree_;
 
+  std::vector<double> previous_computation_;
   geometry_msgs::QuaternionStamped::ConstPtr latest_orientation_cmd_;
   Eigen::Quaterniond rotation_;
 
@@ -236,7 +243,7 @@ private:
   bool has_elevating_mast_;
   
   bool use_planning_based_pointing_;
-  bool disable_orientation_camera_command_input_;
+  bool enable_velocity_control_;
 };
 
 }
