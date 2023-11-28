@@ -901,14 +901,12 @@ void CamJointTrajControl::panTiltVelocityCallback(const robotnik_msgs::ptz::Cons
     }
     else
     {
+      joint_values[i] = joint_manager_.getJoint(i).desired_pos_;
+
       if (std::abs(joint_manager_.getJoint(i).state_.position[0] - joint_manager_.getJoint(i).desired_pos_) <
-          2 * std::abs(offset))
+          2.0 * std::abs(offset))
       {
-        joint_values[i] = joint_manager_.getJoint(i).desired_pos_ + offset;
-      }
-      else
-      {
-        joint_values[i] = joint_manager_.getJoint(i).state_.position[0] + offset;
+        joint_values[i] += offset;
       }
 
       offset = msg->tilt;
@@ -945,13 +943,18 @@ void CamJointTrajControl::cmdCallback(const geometry_msgs::QuaternionStamped::Co
 void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
 {
   // If we got preempted, do nothing
+  ROS_WARN("Trajector preempted: %d", joint_trajectory_preempted_);
+  ROS_WARN("Goal received: %d", new_goal_received_);
+
   if (!joint_trajectory_preempted_){
 
     if (control_mode_ == MODE_LOOKAT){
 
       if (!new_goal_received_){
+        /*
         if (lookat_oneshot_ && !use_direct_position_commands_){
-          std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> >::iterator it = gh_list_.begin();
+          std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> >::iterator it =
+        gh_list_.begin();
 
           while (it != gh_list_.end()){
 
@@ -961,8 +964,10 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
             }
             it++;
           }
-        }else if (lookat_oneshot_ && use_direct_position_commands_) {
-          
+        }else
+        */
+        if (lookat_oneshot_)
+        {
           if (joint_manager_.reachedTarget()){
             
             if (look_at_server_->isActive()){
@@ -972,9 +977,9 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
           }
 
           return;
-
-        
-        }else{
+        }
+        else
+        {
           if (use_planning_based_pointing_ &&
               ((ros::Time::now() - last_plan_time_).toSec() < 0.8))
           {
@@ -1126,6 +1131,7 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
 }
 
 bool CamJointTrajControl::aimAtPOI(const geometry_msgs::PointStamped& poi_position){
+  ROS_ERROR("Starting planning");
   geometry_msgs::QuaternionStamped command_quat;
   Eigen::Vector3d pre_angles;
 
@@ -1232,7 +1238,7 @@ bool CamJointTrajControl::aimAtPOI(const geometry_msgs::PointStamped& poi_positi
       }
     }
 
-    ROS_DEBUG_STREAM("Ceres report: " << summary.FullReport());
+    // ROS_DEBUG_STREAM("Ceres report: " << summary.FullReport());
 
     // If accuracy good enough, break early: 0.5*(0.1/180*pi)^2 = 0.00000152308
     if (best_residual < 0.00000152308)
@@ -1372,16 +1378,16 @@ void CamJointTrajControl::transitionCb(actionlib::ClientGoalHandle<control_msgs:
   // Uncomment below for debugging
 
   ROS_DEBUG("-------------");
-  /*
+
   for (std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> >::iterator it = gh_list_.begin(); it != gh_list_.end(); ++it){
-
-
-    //if (*it == gh){
-    //  ROS_INFO("Same goal handle!");
-    //}else{
-    //  ROS_ERROR("Different goal handles!");
-    //}
-
+    if (*it == gh)
+    {
+      ROS_INFO("Same goal handle!");
+    }
+    else
+    {
+      ROS_ERROR("Different goal handles!");
+    }
 
     if (it->getCommState() == actionlib::CommState::DONE ){
       ROS_INFO("Commstate: %s  Terminalstate: %s", it->getCommState().toString().c_str(), it->getTerminalState().getText().c_str());
@@ -1391,7 +1397,6 @@ void CamJointTrajControl::transitionCb(actionlib::ClientGoalHandle<control_msgs:
     ROS_INFO("+++++++++");
   }
   ROS_INFO("-------------");
-  */
 }
 
 void CamJointTrajControl::lookAtGoalCallback()
