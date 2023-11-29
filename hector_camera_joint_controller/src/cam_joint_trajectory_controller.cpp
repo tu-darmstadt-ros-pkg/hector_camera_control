@@ -901,14 +901,12 @@ void CamJointTrajControl::panTiltVelocityCallback(const robotnik_msgs::ptz::Cons
     }
     else
     {
+      joint_values[i] = joint_manager_.getJoint(i).desired_pos_;
+
       if (std::abs(joint_manager_.getJoint(i).state_.position[0] - joint_manager_.getJoint(i).desired_pos_) <
-          2 * std::abs(offset))
+          2.0 * std::abs(offset))
       {
-        joint_values[i] = joint_manager_.getJoint(i).desired_pos_ + offset;
-      }
-      else
-      {
-        joint_values[i] = joint_manager_.getJoint(i).state_.position[0] + offset;
+        joint_values[i] += offset;
       }
 
       offset = msg->tilt;
@@ -972,8 +970,6 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
           }
 
           return;
-
-        
         }else{
           if (use_planning_based_pointing_ &&
               ((ros::Time::now() - last_plan_time_).toSec() < 0.8))
