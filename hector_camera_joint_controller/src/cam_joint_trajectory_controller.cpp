@@ -952,16 +952,7 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
 
       if (!new_goal_received_){
         if (lookat_oneshot_ && !use_direct_position_commands_){
-          std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> >::iterator it = gh_list_.begin();
-
-          while (it != gh_list_.end()){
-
-            if (it->getCommState() == actionlib::CommState::ACTIVE ){
-              ROS_DEBUG("Controller active, waiting to return");
-              return;
-            }
-            it++;
-          }
+          return;
         }else if (lookat_oneshot_ && use_direct_position_commands_) {
           
           if (joint_manager_.reachedTarget()){
