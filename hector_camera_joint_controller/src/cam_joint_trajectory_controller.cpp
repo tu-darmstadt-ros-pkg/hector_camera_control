@@ -675,7 +675,7 @@ bool CamJointTrajControl::SendTrajectoryCommand(const double* joint_values)
 
   req.motion_plan_request.group_name = move_group_name_;
   req.motion_plan_request.goal_constraints.push_back(constraints);
-  req.motion_plan_request.allowed_planning_time = 0.2;
+  req.motion_plan_request.allowed_planning_time = 1.0;
   req.motion_plan_request.max_velocity_scaling_factor = 1.0;
 
   bool plan_retrieval_success = this->get_plan_service_client_.call(req, res);
