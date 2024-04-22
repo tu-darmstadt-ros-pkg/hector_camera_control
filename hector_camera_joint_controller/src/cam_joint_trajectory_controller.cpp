@@ -666,9 +666,12 @@ bool CamJointTrajControl::SendTrajectoryCommand(const double* joint_values)
 
   for (size_t i = 0; i < joint_manager_.getNumJoints(); ++i)
   {
-    joint_constraint.joint_name = joint_manager_.getJoint(i).state_.name[0];
-    joint_constraint.position = joint_values[i];
-    joint_manager_.getJoint(i).desired_pos_ = joint_values[i];
+    TrackedJoint current_joint = joint_manager_.getJoint(i);
+    double constrained_target_position = std::max(current_joint.lower_limit_, std::min(joint_values[i], current_joint.upper_limit_));
+
+    joint_constraint.joint_name = current_joint.state_.name[0];
+    joint_constraint.position = constrained_target_position;
+    joint_manager_.getJoint(i).desired_pos_ = constrained_target_position;
 
     constraints.joint_constraints.push_back(joint_constraint);
   }
