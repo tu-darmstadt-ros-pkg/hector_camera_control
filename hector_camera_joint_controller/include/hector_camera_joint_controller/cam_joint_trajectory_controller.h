@@ -143,6 +143,7 @@ private:
   void lookAtPreemptCallback();
 
   void trajActionStatusCallback(const actionlib_msgs::GoalStatusArrayConstPtr& msg);
+  void trajActionFeedbackCallback(const control_msgs::FollowJointTrajectoryFeedbackConstPtr& msg);
 
   void stopControllerTrajExecution();
 

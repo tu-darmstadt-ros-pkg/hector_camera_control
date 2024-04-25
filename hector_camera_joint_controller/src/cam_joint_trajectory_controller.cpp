@@ -653,6 +653,9 @@ void CamJointTrajControl::SendJointCommand(const double* joint_values)
 
 bool CamJointTrajControl::SendTrajectoryCommand(const double* joint_values)
 {
+
+  previous_computation_.clear();
+
   moveit_msgs::GetMotionPlanRequest req;
   moveit_msgs::GetMotionPlanResponse res;
 
@@ -666,17 +669,22 @@ bool CamJointTrajControl::SendTrajectoryCommand(const double* joint_values)
 
   for (size_t i = 0; i < joint_manager_.getNumJoints(); ++i)
   {
-    joint_constraint.joint_name = joint_manager_.getJoint(i).state_.name[0];
-    joint_constraint.position = joint_values[i];
-    joint_manager_.getJoint(i).desired_pos_ = joint_values[i];
+    previous_computation_.push_back(joint_values[i]);
+
+    TrackedJoint current_joint = joint_manager_.getJoint(i);
+    double constrained_target_position = std::max(current_joint.lower_limit_, std::min(joint_values[i], current_joint.upper_limit_));
+
+    joint_constraint.joint_name = current_joint.state_.name[0];
+    joint_constraint.position = constrained_target_position;
+    joint_manager_.getJoint(i).desired_pos_ = constrained_target_position;
 
     constraints.joint_constraints.push_back(joint_constraint);
   }
 
   req.motion_plan_request.group_name = move_group_name_;
   req.motion_plan_request.goal_constraints.push_back(constraints);
-  req.motion_plan_request.allowed_planning_time = 0.2;
-  req.motion_plan_request.max_velocity_scaling_factor = 1.0;
+  req.motion_plan_request.allowed_planning_time = 1.0;
+  req.motion_plan_request.max_velocity_scaling_factor = 0.9;
 
   bool plan_retrieval_success = this->get_plan_service_client_.call(req, res);
 
@@ -704,7 +712,7 @@ bool CamJointTrajControl::SendTrajectoryCommand(const double* joint_values)
 
   last_plan_time_ = ros::Time::now();
 
-  gh_list_.push_back(joint_traj_client_->sendGoal(goal, boost::bind(&CamJointTrajControl::transitionCb, this, _1)));
+  gh_list_.push_back(joint_traj_client_->sendGoal(goal, boost::bind(&CamJointTrajControl::transitionCb, this, _1), boost::bind(&CamJointTrajControl::trajActionFeedbackCallback, this, _2)));
 
   return true;
 }
@@ -949,16 +957,7 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
 
       if (!new_goal_received_){
         if (lookat_oneshot_ && !use_direct_position_commands_){
-          std::list<actionlib::ClientGoalHandle<control_msgs::FollowJointTrajectoryAction> >::iterator it = gh_list_.begin();
-
-          while (it != gh_list_.end()){
-
-            if (it->getCommState() == actionlib::CommState::ACTIVE ){
-              ROS_DEBUG("Controller active, waiting to return");
-              return;
-            }
-            it++;
-          }
+          return;
         }else if (lookat_oneshot_ && use_direct_position_commands_) {
           
           if (joint_manager_.reachedTarget()){
@@ -1430,6 +1429,21 @@ void CamJointTrajControl::lookAtPreemptCallback()
   joint_trajectory_preempted_ = true;
   this->stopControllerTrajExecution();
   control_mode_ = MODE_OFF;
+}
+
+void CamJointTrajControl::trajActionFeedbackCallback(const control_msgs::FollowJointTrajectoryFeedbackConstPtr& msg)
+{
+  for(auto joint_error : msg->error.positions){
+    if (std::abs(joint_error) > 0.12){
+      ROS_WARN("Joint error too high, cancelling trajectory and retrying");
+      joint_traj_client_->cancelAllGoals();
+
+      double* joint_values = &previous_computation_[0];
+      SendTrajectoryCommand(joint_values);
+
+      return;
+    }
+  }
 }
 
 void CamJointTrajControl::trajActionStatusCallback(const actionlib_msgs::GoalStatusArrayConstPtr& msg)
