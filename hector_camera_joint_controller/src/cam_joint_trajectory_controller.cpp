@@ -396,8 +396,6 @@ void CamJointTrajControl::Init()
     pan_tilt_sub_ = nh_.subscribe("/pan_tilt_vel", 1, &CamJointTrajControl::panTiltVelocityCallback, this);
   }
 
-  this->Reset();
-
   //Sleep for short time to let tf receive messages
   ros::Duration(1.0).sleep();
 
