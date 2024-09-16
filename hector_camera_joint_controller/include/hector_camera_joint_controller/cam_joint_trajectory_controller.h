@@ -174,6 +174,7 @@ private:
   double command_goal_time_from_start_;
   double max_axis_speed_;
   double pitch_axis_factor_;
+  bool pan_before_tilt_;
 
   bool joint_trajectory_preempted_;
 
