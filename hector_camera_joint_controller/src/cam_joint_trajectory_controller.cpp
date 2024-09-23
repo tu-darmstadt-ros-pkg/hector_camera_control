@@ -315,6 +315,8 @@ void CamJointTrajControl::Init()
     pitch_axis_factor_ = -1.0;
   }
 
+  pnh_.param<bool>("pan_before_tilt", pan_before_tilt_, true);
+
   has_elevating_mast_ = false;
   pnh_.getParam("has_elevating_mast", has_elevating_mast_);
 
@@ -899,7 +901,8 @@ void CamJointTrajControl::panTiltVelocityCallback(const robotnik_msgs::ptz::Cons
   int n = joint_manager_.getNumJoints();
   double joint_values[n];
 
-  float offset = msg->pan;  // Assumes pan-tilt order
+  // Decide which direction to apply first
+  float offset = pan_before_tilt_ ? msg->pan : msg->tilt;
 
   for (int i = 0; i < n; i++)
   {
@@ -917,7 +920,7 @@ void CamJointTrajControl::panTiltVelocityCallback(const robotnik_msgs::ptz::Cons
         joint_values[i] += offset;
       }
 
-      offset = msg->tilt;
+      offset = pan_before_tilt_ ? msg->tilt : msg->pan;
     }
   }
 
