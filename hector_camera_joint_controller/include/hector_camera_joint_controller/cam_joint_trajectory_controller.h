@@ -68,6 +68,8 @@ struct TargetPointPatternElement{
   double goto_velocity_factor;
 };
 
+const double deg2rad = M_PI / 180.0;
+const double rad2deg = 180 / M_PI;
 
 
 class TrackedJoint{
@@ -133,7 +135,7 @@ private:
   bool ComputeHeightForPoint(const geometry_msgs::PointStamped& lookat_point, double& height);
 
   bool ComputeJointCommand(const geometry_msgs::QuaternionStamped& command_to_use, Eigen::Vector3d& joint_values);
-  void SendJointCommand(const double* joint_values);
+  bool SendJointCommand(const double* joint_values);
   bool SendTrajectoryCommand(const double* joint_values);
   bool aimAtPOI(const geometry_msgs::PointStamped& poi_position);
 
@@ -251,4 +253,5 @@ private:
 }
 
 #endif
+
 
