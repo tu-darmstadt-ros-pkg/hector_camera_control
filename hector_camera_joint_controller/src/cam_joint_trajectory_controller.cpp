@@ -90,9 +90,9 @@ TrackedJoint::TrackedJoint(const std::string& joint_name, const std::string& top
   this->keep_fixed_ = keep_fixed;
   fixed_value_ = 0.0;
 
-  ROS_INFO_STREAM("Added joint " << joint_name << " topic: " << topic << " lowerl: " << lower_limit
-                                 << " upperl: " << upper_limit << " reached thresh: " << reached_threshold
-                                 << " keep fixed: " << keep_fixed);
+  ROS_INFO_STREAM("Added joint " << joint_name << "\ntopic: " << topic << "\nlower limit: " << lower_limit
+                                 << "\nupper limit: " << upper_limit << "\nreached thresh: " << reached_threshold
+                                 << "\nkeep fixed: " << keep_fixed ? "Yes" : "No");
 
   joint_target_pub_ = nh.advertise<std_msgs::Float64>("/" + topic,1,false);
 }
@@ -124,7 +124,7 @@ bool TrackedJoint::reachedTarget()
 {
   double time_diff = (ros::Time::now() - this->state_.header.stamp).toSec();
   if ( std::abs(time_diff) > 2.0){
-    ROS_WARN_STREAM_THROTTLE(5.0, "Joint " << this->state_.name[0] << " time diff " << time_diff << ", unable to check if reached target, assuming not. Throttled.");
+    ROS_WARN_STREAM_THROTTLE(5.0, "Joint " << this->state_.name[0] << " last updated " << time_diff << "s ago, unable to check if reached target, assuming not. Throttled.");
     return false;
   }
 
@@ -398,8 +398,6 @@ void CamJointTrajControl::Init()
     pan_tilt_sub_ = nh_.subscribe("/pan_tilt_vel", 1, &CamJointTrajControl::panTiltVelocityCallback, this);
   }
 
-  this->Reset();
-
   //Sleep for short time to let tf receive messages
   ros::Duration(1.0).sleep();
 
@@ -636,7 +634,7 @@ bool CamJointTrajControl::ComputeDirectionForPoint(const geometry_msgs::PointSta
   return true;
 }
 
-void CamJointTrajControl::SendJointCommand(const double* joint_values)
+bool CamJointTrajControl::SendJointCommand(const double* joint_values)
 {
   for (int i = 0; i < joint_manager_.getNumJoints(); i++)
   {
@@ -650,7 +648,7 @@ void CamJointTrajControl::SendJointCommand(const double* joint_values)
     }
   }
 
-  return;
+  return true;
 }
 
 bool CamJointTrajControl::SendTrajectoryCommand(const double* joint_values)
@@ -692,13 +690,13 @@ bool CamJointTrajControl::SendTrajectoryCommand(const double* joint_values)
 
   if (!plan_retrieval_success)
   {
-    ROS_WARN("[cam joint ctrl] Planning service returned false, aborting");
+    ROS_WARN("[cam joint ctrl] Motion planning service returned false, aborting");
     return false;
   }
 
   if (!(res.motion_plan_response.error_code.val == moveit_msgs::MoveItErrorCodes::SUCCESS))
   {
-    ROS_WARN("[cam joint ctrl] Plan result error code is %d, aborting.",
+    ROS_WARN("[cam joint ctrl] Motion planning failed with error code %d, aborting.",
              static_cast<int>(res.motion_plan_response.error_code.val));
     return false;
   }
@@ -1126,6 +1124,7 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
 bool CamJointTrajControl::aimAtPOI(const geometry_msgs::PointStamped& poi_position){
   geometry_msgs::QuaternionStamped command_quat;
   Eigen::Vector3d pre_angles;
+  float planning_offset;
 
   // The variable to solve for with its initial precomputed value respecting joint limits
   const int n = joint_manager_.getNumJoints();
@@ -1141,7 +1140,7 @@ bool CamJointTrajControl::aimAtPOI(const geometry_msgs::PointStamped& poi_positi
 
   KDL::Chain chain;
   if (!tree_.getChain(robot_link_reference_frame_, aim_frame_, chain)){
-    ROS_WARN("Could not find link %s required for aiming at the POI", aim_frame_.c_str());
+    ROS_WARN("Could not find aiming link %s required for aiming at the POI", aim_frame_.c_str());
     return false;
   }
 
@@ -1152,7 +1151,7 @@ bool CamJointTrajControl::aimAtPOI(const geometry_msgs::PointStamped& poi_positi
     transform_listener_->waitForTransform(robot_link_reference_frame_, poi_position.header.frame_id, ros::Time(), ros::Duration(1.0));
     transform_listener_->transformPoint(robot_link_reference_frame_, ros::Time(), poi_position, poi_position.header.frame_id, poi_in_reference_frame);
   } catch (std::runtime_error& e) {
-    ROS_WARN("Could not transform look_at position to target frame_id %s", e.what());
+    ROS_WARN("Could not get transform between %s and %s: %s", robot_link_reference_frame_.c_str(), poi_position.header.frame_id.c_str(), e.what());
     return false;
   }
 
@@ -1231,24 +1230,35 @@ bool CamJointTrajControl::aimAtPOI(const geometry_msgs::PointStamped& poi_positi
     }
 
     ROS_DEBUG_STREAM("Ceres report: " << summary.FullReport());
+    planning_offset = sqrt(2*best_residual);
 
-    // If accuracy good enough, break early: 0.5*(0.1/180*pi)^2 = 0.00000152308
-    if (best_residual < 0.00000152308)
+    // If accuracy good enough, break early
+    if (planning_offset < 0.1 * deg2rad)
     {
       break;
     }
   }
 
-  ROS_DEBUG("Computed pan angle : %f", best_result[0]);
-  ROS_DEBUG("Computed residual: %f", best_residual);
+  ROS_INFO("Deviation from target based on planning [rad]: %f", planning_offset);
+
+  if(planning_offset > 5.0 * deg2rad)
+  {
+    ROS_ERROR("Planning offset is bigger than 5.0 degrees!");
+  }
+  else if(planning_offset > 0.5 * deg2rad)
+  {
+    ROS_WARN("Planning offset is bigger than 0.5 degrees!");
+  }
+  else if(planning_offset > 0.1 * deg2rad)
+  {
+    ROS_WARN("Planning offset is bigger than 0.1 degrees!");
+  }
 
   previous_computation_.clear();
 
-  // TODO: Check deviation to goal here, potentially abort
-
   if (use_direct_position_commands_)
   {
-    SendJointCommand(best_result);
+    return SendJointCommand(best_result);
   }
   else
   {
@@ -1260,7 +1270,7 @@ bool CamJointTrajControl::aimAtPOI(const geometry_msgs::PointStamped& poi_positi
       }
       previous_computation_.push_back(best_result[i]);
     }
-    SendTrajectoryCommand(best_result);
+    return SendTrajectoryCommand(best_result);
   }
 
   return true;
@@ -1418,7 +1428,8 @@ void CamJointTrajControl::lookAtGoalCallback()
     lookat_point_ = goal->look_at_target.target_point;
     lookat_oneshot_ = goal->look_at_target.no_continuous_tracking;
     control_mode_ = MODE_LOOKAT;
-    ROS_INFO("Starting LookAt Action with: no_continuous_tracking: %d", goal->look_at_target.no_continuous_tracking);
+    ROS_INFO_STREAM("Starting LookAt Action using link " << goal->look_at_target.aim_frame << " in frame " << goal->look_at_target.target_point.header.frame_id);
+    ROS_INFO_STREAM("Aiming at: \n" << goal->look_at_target.target_point.point);
 
     new_goal_received_ = true;
   }
@@ -1438,7 +1449,7 @@ void CamJointTrajControl::trajActionFeedbackCallback(const control_msgs::FollowJ
 {
   for(auto joint_error : msg->error.positions){
     if (std::abs(joint_error) > 0.12){
-      ROS_WARN("Joint error too high, cancelling trajectory and retrying");
+      ROS_WARN("[cam joint ctrl] Joint error too high, cancelling trajectory and retrying");
       joint_traj_client_->cancelAllGoals();
 
       double* joint_values = &previous_computation_[0];
@@ -1594,4 +1605,5 @@ int main(int argc, char **argv)
 
     return 0;
 }
+
 
