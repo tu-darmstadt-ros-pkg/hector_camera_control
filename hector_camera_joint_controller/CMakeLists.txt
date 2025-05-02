@@ -5,6 +5,7 @@ find_package(catkin REQUIRED COMPONENTS
   actionlib
   cmake_modules
   control_msgs
+  er_ui_notification_msgs
   geometry_msgs
   hector_perception_msgs
   kdl_parser

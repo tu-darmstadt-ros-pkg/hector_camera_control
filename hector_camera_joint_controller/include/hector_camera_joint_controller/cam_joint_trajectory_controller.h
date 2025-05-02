@@ -162,6 +162,8 @@ private:
                                     const Eigen::Vector3d& tail,
                                     const Eigen::Vector3d& point);
 
+  void sendPlanningFailureNotification();
+
   unsigned int rotationConv;
 
   std::string controller_namespace_;
@@ -200,6 +202,7 @@ private:
 
   ros::Publisher pattern_info_pub_;
   ros::Publisher goal_point_pub_;
+  ros::Publisher notification_pub_;
 
   ros::ServiceClient get_plan_service_client_;
 
