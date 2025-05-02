@@ -27,6 +27,7 @@
   <depend>kdl_parser</depend>
   <depend>urdf</depend>
   <depend>robotnik_msgs</depend>
+  <depend>er_ui_notification_msgs</depend>
 
   <export>
   </export>

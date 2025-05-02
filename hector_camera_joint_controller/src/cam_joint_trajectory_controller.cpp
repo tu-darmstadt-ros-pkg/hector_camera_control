@@ -49,6 +49,11 @@
 #include <hector_perception_msgs/CameraPatternInfo.h>
 #include <control_msgs/QueryTrajectoryState.h>
 
+#include <er_ui_notification_msgs/KeyArgument.h>
+#include <er_ui_notification_msgs/Notification.h>
+#include <er_ui_notification_msgs/NotificationLevel.h>
+#include <er_ui_notification_msgs/NotificationScope.h>
+
 namespace cam_control {
 
 double normalize_angle(double x)
@@ -275,8 +280,9 @@ void CamJointTrajControl::Init()
   pnh_ = ros::NodeHandle("~");
   nh_ = ros::NodeHandle("");
 
-  pattern_info_pub_ = pnh_.advertise<hector_perception_msgs::CameraPatternInfo>("/available_camera_patterns",2, true);
-  goal_point_pub_   = pnh_.advertise<geometry_msgs::PointStamped>("goal_point",1 , false);
+  pattern_info_pub_ = pnh_.advertise<hector_perception_msgs::CameraPatternInfo>("/available_camera_patterns", 2, true);
+  goal_point_pub_   = pnh_.advertise<geometry_msgs::PointStamped>("goal_point", 1, false);
+  notification_pub_ = nh_.advertise<er_ui_notification_msgs::Notification>("/ui_notification", 10 , false);
 
   pnh_.param<std::string>("move_group", move_group_name_, "sensor_head_group");
 
@@ -921,14 +927,20 @@ void CamJointTrajControl::panTiltVelocityCallback(const robotnik_msgs::ptz::Cons
       offset = pan_before_tilt_ ? msg->tilt : msg->pan;
     }
   }
-
+  bool success;
   if (use_direct_position_commands_)
   {
-    this->SendJointCommand(joint_values);
+    success = this->SendJointCommand(joint_values);
   }
   else
   {
-    this->SendTrajectoryCommand(joint_values);
+    success = this->SendTrajectoryCommand(joint_values);
+  }
+
+  if(!success)
+  {
+    ROS_WARN("[cam joint ctrl] Failed to send joint command");
+    sendPlanningFailureNotification();
   }
 }
 
@@ -1006,6 +1018,7 @@ void CamJointTrajControl::controlTimerCallback(const ros::TimerEvent& event)
       }else{
         if (!this->aimAtPOI(this->lookat_point_))
         {
+          sendPlanningFailureNotification();
           if (look_at_server_->isActive())
           {
             ROS_INFO("Attempting to plan lookat failed multiple times, aborting.");
@@ -1591,6 +1604,25 @@ double CamJointTrajControl::getClosestPointLineSegment(const Eigen::Vector3d& he
 
     //return (point - projection).norm();
     return t;
+}
+
+void CamJointTrajControl::sendPlanningFailureNotification()
+{
+    er_ui_notification_msgs::Notification notification_msg;
+    notification_msg.scope.scope = er_ui_notification_msgs::NotificationScope::NOTIFICATION_SCOPE_ROBOT;
+    notification_msg.level.level = er_ui_notification_msgs::NotificationLevel::NOTIFICATION_LEVEL_WARNING;
+    notification_msg.timestamp = ros::Time::now();
+    notification_msg.throttle_period = ros::Duration(10.0);
+    
+    if (use_direct_position_commands_)
+    {
+      notification_msg.key = "softwareTeleopCameraAimingFailed";
+    }
+    else
+    {
+      notification_msg.key = "softwareTeleopRobotArmAimingFailed";
+    }
+    notification_pub_.publish(notification_msg);
 }
 
 }
